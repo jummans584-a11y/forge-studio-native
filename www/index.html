@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Forge Studio — Character &amp; Terrain</title>
+<!-- PWA: makes this installable to the home screen as a standalone app (own icon, no browser
+     address bar, works offline after first launch). Requires index.html, manifest.json, sw.js and
+     the icon-*.png files to all be hosted together in the same folder — see PWA_APK_GUIDE.md. -->
+<link rel="manifest" href="./manifest.json" />
+<meta name="theme-color" content="#16171a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Forge Studio" />
+<link rel="apple-touch-icon" href="./icon-180.png" />
+<link rel="icon" href="./icon-192.png" />
+<style>
+  :root {
+    --bg: #131418;
+    --panel: #1c1e23;
+    --panel-2: #262931;
+    --panel-3: #2f323c;
+    --line: #34373f;
+    --line-soft: #24262c;
+    --ink: #f0f1f4;
+    --ink-dim: #999da8;
+    --ink-faint: #6c7078;
+    --accent: #ff7a3d;
+    --accent-2: #ffb27a;
+    --accent-dim: #5a3a2b;
+    --accent-glow: rgba(255,122,61,0.32);
+    --green: #4a8f6a;
+    --green-glow: rgba(74,143,106,0.3);
+    --danger: #ff6b6b;
+    --danger-dim: #4a2a2a;
+    --warn: #e0a458;
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-pill: 999px;
+    --shadow-sm: 0 2px 6px rgba(0,0,0,0.25);
+    --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
+    --shadow-lg: 0 -8px 28px rgba(0,0,0,0.4);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    touch-action: none;
+  }
+  #app { position: relative; width: 100%; height: 100%; }
+  #canvas-wrap { position: absolute; inset: 0; }
+  canvas#three { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  #topbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 10px;
+    background: linear-gradient(to bottom, rgba(22,23,26,0.94), rgba(22,23,26,0));
+    z-index: 10;
+    pointer-events: none;
+  }
+  #topbar * { pointer-events: auto; }
+  .title { font-size: 12px; letter-spacing: 0.03em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title b { color: var(--ink); font-weight: 600; }
+
+  #workspace-tabs { display: flex; background: var(--panel-2); border-radius: var(--r-md); padding: 2px; gap: 2px; border: 1px solid var(--line); }
+  #workspace-tabs button { border: none; background: transparent; color: var(--ink-dim); padding: 6px 10px; border-radius: var(--r-sm); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
+  #workspace-tabs button.active { background: var(--accent); color: #1a1005; box-shadow: 0 2px 8px var(--accent-glow); }
+
+  .iconbtn {
+    width: 30px; height: 30px; border-radius: var(--r-sm); flex-shrink: 0;
+    background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); display: flex; align-items: center; justify-content: center;
+    font-size: 13px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  }
+  .iconbtn:active { background: var(--accent-dim); border-color: var(--accent); transform: scale(0.93); }
+
+  #gizmoBar {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    z-index: 12; display: none; flex-direction: row; align-items: stretch; gap: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden;
+    box-shadow: var(--shadow-md); transition: transform 0.2s ease;
+  }
+  #gizmoBar.show { display: flex; }
+  #gizmoBar .vp-bar-buttons {
+    display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  }
+  #gizmoBar button {
+    width: 32px; height: 32px; border-radius: var(--r-sm); border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink-dim); font-size: 15px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  #gizmoBar button.active { background: var(--accent); border-color: var(--accent); color: #1a1005; box-shadow: 0 2px 8px var(--accent-glow); }
+  #gizmoBar button:disabled { opacity: 0.35; cursor: default; }
+  #gizmoBar button#gizmoAddBtn { color: var(--accent-2); border-color: var(--accent-dim); }
+  #gizmoBar button#gizmoFocusBtn { margin-top: 0; border-top: none; padding-top: 8px; border-radius: 0; }
+  #gizmoBar button#gizmoGroundLockBtn { margin-top: 4px; border-top: 1px solid var(--line); padding-top: 8px; border-radius: 0; }
+  #gizmoBar .vp-bar-buttons button:last-child { border-radius: 0 0 var(--r-sm) var(--r-sm); }
+
+  /* ---------- Viewport floating control bars (left: camera/select) ----------
+     Right side reuses #gizmoBar above (＋ Add / Move / Rotate / Scale / 🎯 Focus). Undo/Redo live
+     only in the top bar (#btn-undo/#btn-redo) — there used to be a second floating Undo/Redo/Focus
+     bar docked at the bottom-center of the viewport too, which just duplicated the top bar controls
+     and ate into the 3D view for no reason, so it's gone; Focus moved into #gizmoBar instead so the
+     feature isn't lost, just no longer its own floating bar. */
+  .vp-float-bar {
+    position: absolute; z-index: 12; display: none; align-items: stretch; gap: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden;
+    box-shadow: var(--shadow-md);
+  }
+  .vp-float-bar.show { display: flex; }
+  .vp-float-bar .vp-bar-buttons {
+    display: flex; flex-direction: column; gap: 6px; padding: 6px;
+  }
+  .vp-float-bar button {
+    width: 32px; height: 32px; border-radius: var(--r-sm); border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink-dim); font-size: 15px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .vp-float-bar button.active { background: var(--accent); border-color: var(--accent); color: #1a1005; box-shadow: 0 2px 8px var(--accent-glow); }
+  #vpLeftBar {
+    left: 10px; top: 92px; flex-direction: row;
+    transition: transform 0.2s ease;
+  }
+  /* Collapse handle — one seamless piece with the bar itself (no separate floating element, no
+     gap): just a slim tab inside the same rounded pill, set off from the buttons by a hairline
+     divider instead of its own background/border/radius. Bar + handle always move together. */
+  .vp-bar-handle {
+    flex-shrink: 0; width: 20px;
+    background: var(--panel-2); color: var(--ink-dim);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer;
+  }
+  #vpLeftBarHandle { border-left: 1px solid var(--line); }
+  #gizmoBarHandle { border-right: 1px solid var(--line); }
+  /* Collapsed: slide the whole bar+handle pill off by its own width, so the button column is fully
+     hidden and only half of the 20px handle tab still pokes past the screen edge — enough to grab,
+     not enough to sit there looking like a whole extra block. */
+  #vpLeftBar.collapsed { transform: translateX(-64px); }
+  #gizmoBar.collapsed { transform: translateY(-50%) translateX(64px); }
+
+  #empty-state {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 32px; gap: 14px; z-index: 5;
+  }
+  #empty-state .glyph { font-size: 42px; opacity: 0.55; filter: drop-shadow(0 0 18px var(--accent-glow)); }
+  #empty-state h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  #empty-state p { font-size: 13px; color: var(--ink-dim); max-width: 320px; margin: 0; line-height: 1.55; }
+  .btn-row { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    padding: 9px 14px; border-radius: var(--r-md); border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink); font-size: 12.5px; font-weight: 500;
+    cursor: pointer; box-shadow: var(--shadow-sm);
+    transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1005; font-weight: 600; box-shadow: 0 3px 12px var(--accent-glow); }
+  .btn.green { background: var(--green); border-color: var(--green); color: #08150e; font-weight: 600; box-shadow: 0 3px 12px var(--green-glow); }
+  .btn.danger { color: var(--danger); border-color: rgba(255,107,107,0.4); background: rgba(255,107,107,0.08); }
+  .btn:active { opacity: 0.8; transform: scale(0.97); box-shadow: none; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+  /* ============================================================
+     Draggable mobile bottom sheet (Phases 2/3/8/9)
+     #dock-sheet is the whole panel: it owns height/position and is what gets dragged.
+     #dock-handle-area is the ONLY drag surface — a separate DOM element from the canvas and from
+     the scrollable content below, so panel-drag, camera-orbit, and content-scroll/sliders/buttons
+     never fight over the same touch (Phase 3 / Phase 8).
+     #dock keeps its original role as the scrollable content container that all the buildXDock()
+     functions already populate — untouched by this restructure.
+  ============================================================ */
+  #dock-sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    box-shadow: var(--shadow-lg);
+    z-index: 10;
+    display: none;
+    flex-direction: column;
+    height: 38vh; /* JS overrides this per drag/snap state once initialized */
+    max-height: 92vh;
+    touch-action: none;
+  }
+  #dock-sheet.show { display: flex; }
+  #dock-sheet.dragging { transition: none !important; }
+  #dock-sheet.snap { transition: height 0.28s cubic-bezier(0.22, 1, 0.36, 1), width 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+
+  /* Landscape (phone rotated sideways): the sheet moves from a bottom drawer to a LEFT-side drawer
+     instead, so the tool list (tree/rock/tractor/etc.) no longer eats into the short vertical
+     space landscape gives the 3D view. Same drag-to-resize / tap-to-collapse behavior as portrait,
+     just width-driven instead of height-driven — grab the handle (now on the drawer's right edge,
+     bordering the map) and slide it left to tuck the panel away, same as swiping a notification
+     shade shut, or right to bring it back out. */
+  #dock-sheet.landscape {
+    left: 0; right: auto; top: 0; bottom: 0;
+    width: 40vw; /* JS overrides this per drag/snap state once initialized */
+    height: auto; max-height: none; max-width: 92vw;
+    border-top: none; border-right: 1px solid var(--line);
+    border-radius: 0 16px 16px 0;
+    box-shadow: 8px 0 24px rgba(0,0,0,0.35);
+    flex-direction: row;
+  }
+
+  /* Fullscreen block-shape preview (see openBlockPreview): floats above everything, hides the
+     normal dock/topbar so the 3D view is as large as possible while the user reshapes the block
+     with their imagination before committing it to the map. */
+  #block-preview-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: none; flex-direction: column; gap: 8px;
+    background: rgba(18,19,22,0.94);
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.4);
+  }
+  #block-preview-hint {
+    position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 0; right: 0;
+    z-index: 30; text-align: center; pointer-events: none;
+    font-size: 11.5px; color: rgba(255,255,255,0.75); text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    display: none;
+  }
+
+  /* BUGFIX: the actual touch target here was only ~14px tall (6px+4px+4px padding+bar) — far below
+     the ~44px minimum a finger can reliably hit. That made grabbing the handle unreliable on a real
+     phone even though the drag logic itself (setupDockDrag, further down) was always correct: most
+     touches were simply landing just above/below the strip and missing it entirely, hitting either
+     the empty top of the sheet (no listener) or the scrollable #dock content instead (which only
+     scrolls, doesn't resize the sheet). min-height + justify-content:center gives the same thin
+     visual bar a properly sized, centered tap zone around it without changing how it looks. This is
+     unrelated to the earlier slider touch-action fix — different element, never touched by that.
+  */
+  #dock-handle-area {
+    flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 34px;
+    padding: 6px 0 4px; cursor: grab; touch-action: none;
+  }
+  #dock-handle-bar { width: 40px; height: 4px; border-radius: 3px; background: var(--line); transition: background 0.15s ease, width 0.15s ease; }
+
+  /* BUGFIX/redesign: every tool's Orbit/<tool-mode> switch (Paint, Select, Trace path, Tap, etc.)
+     used to be the first item INSIDE the scrollable #dock — visually it looked "attached to the
+     content", but dragging the handle only changes #dock-sheet's HEIGHT, it doesn't scroll or move
+     the content itself, so that switch just sat wherever the current scroll position happened to
+     leave it and could end up out of view when the sheet was short. #dock-mode-bar sits between the
+     drag handle and the scrollable panel, outside #dock, so it's always visible and travels with
+     the handle/sheet as one piece no matter how tall the sheet is or how far you've scrolled the
+     panel below it — genuinely part of the toolbar system now, not just the top of a scroll list.
+     Hidden (display:none, set from JS) on tabs that don't have a mode switch at all. */
+  #dock-mode-bar {
+    flex-shrink: 0; padding: 0 10px 8px; display: none;
+  }
+  #dock-mode-bar .seg { width: 100%; }
+  #dock-handle-area:active #dock-handle-bar { background: var(--accent); width: 48px; }
+  /* In landscape the handle sits as a vertical strip on the drawer's right edge (order:2 puts it
+     after the scrollable content, i.e. bordering the map) so the grab gesture is a natural
+     left/right swipe instead of up/down. */
+  #dock-sheet.landscape #dock-handle-area { flex-direction: row; padding: 0 7px 0 5px; order: 2; min-height: 0; min-width: 34px; }
+  #dock-sheet.landscape #dock-handle-bar { width: 4px; height: 44px; }
+
+  #dock {
+    position: static;
+    flex: 1; min-height: 0;
+    background: transparent;
+    border-top: none;
+    padding: 2px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    z-index: auto;
+    display: block;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+  /* BUGFIX: #dock only allows vertical-pan gestures (so the panel itself can be scrolled). Range
+     sliders live inside it (brush size for vegetation/mountain/terrain, material sliders, UV
+     sliders, etc.) and need to respond to pure horizontal drags. Under touch-action:pan-y the
+     browser withholds gesture recognition on a horizontal-only drag until some vertical motion
+     shows up (matching "works only if I nudge up/down first" reports), because it's still trying
+     to decide whether the touch is meant to scroll the panel. Giving every slider its own
+     touch-action:none opts it out of that scroll-gesture arbitration entirely, so its thumb starts
+     tracking the very first touch-move regardless of direction — same fix already used for the 3D
+     canvas above, just scoped to the sliders instead of blocking dock scrolling entirely. */
+  #dock input[type="range"] {
+    touch-action: none;
+  }
+  #dock-sheet.landscape #dock {
+    order: 1;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 8px calc(10px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px));
+  }
+  /* Landscape: the drawer is narrow-but-tall (not wide-but-short like portrait), so the 5-across
+     primary toolbar row would otherwise squeeze into a sliver and the labels/icons start
+     overlapping ("chipak" together). Stack it into a column instead — plenty of vertical room in
+     landscape, and each button stays full width and easy to tap. */
+  #dock-sheet.landscape .toolbar-primary { flex-direction: column; }
+  #dock-sheet.landscape .toolbar-primary button { flex-direction: row; justify-content: flex-start; gap: 8px; padding: 10px 10px; }
+  #dock-sheet.landscape .toolbar-primary button .lb { font-size: 12px; }
+  #dock-sheet.landscape .toolbar-secondary { flex-direction: column; overflow-x: visible; overflow-y: auto; max-height: 32vh; }
+  #dock-sheet.landscape .toolbar-secondary button { width: 100%; text-align: left; }
+
+
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .row:last-child { margin-bottom: 0; }
+  .label { font-size: 10px; color: var(--ink-dim); width: 42px; flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+
+  #swatches { display: flex; gap: 8px; overflow-x: auto; flex: 1; min-width: 0; padding: 2px; -webkit-overflow-scrolling: touch; }
+  .swatch { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.15); cursor: pointer; box-shadow: var(--shadow-sm); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+  .swatch:active { transform: scale(0.9); }
+  .swatch.active { border-color: var(--ink); box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); }
+  #colorpicker { width: 30px; height: 30px; border-radius: 50%; border: none; flex-shrink: 0; background: none; padding: 0; cursor: pointer; }
+
+  /* Custom slider — the stock Android range input is a thin, hard-to-grab line with no visual
+     weight, and it's the single most-used control in this app (every brush/terrain/paint
+     parameter runs through one). A wider track + a distinct glowing thumb gives it presence and
+     a bigger, easier touch target without changing any of the underlying <input> wiring — every
+     existing oninput/onchange handler keeps working untouched. */
+  input[type=range] {
+    flex: 1; min-width: 0; -webkit-appearance: none; appearance: none;
+    height: 5px; border-radius: var(--r-pill); background: var(--panel-2);
+    outline: none; margin: 10px 0;
+  }
+  input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); border: 3px solid var(--panel); margin-top: -7.5px;
+    box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
+    transition: transform 0.12s ease;
+  }
+  input[type=range]:active::-webkit-slider-thumb { transform: scale(1.15); }
+  input[type=range]::-moz-range-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
+  input[type=range]::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--accent);
+    border: 3px solid var(--panel); box-shadow: 0 2px 8px var(--accen
