@@ -1,0 +1,16 @@
+{
+  "name": "forge-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Forge Studio — Character & Terrain 3D editor",
+  "scripts": {
+    "build": "echo 'static app, nothing to build'"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
