@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.jummans584a11y.forgestudio",
+  "appName": "Forge Studio",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true
+  }
+}
