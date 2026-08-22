@@ -10478,5 +10478,27 @@
     });
   }
 </script>
+<script>
+  // Shows a real AdMob banner ad at the bottom of the app when running inside the packaged
+  // Android app (Capacitor). Does nothing when opened as a plain website (Capacitor.Plugins won't
+  // exist there) — that's expected, ads only work inside the installed APK.
+  window.addEventListener('load', () => {
+    try {
+      if (window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob) {
+        const { AdMob, BannerAdPosition, BannerAdSize } = Capacitor.Plugins.AdMob;
+        AdMob.initialize({ initializeForTesting: false })
+          .then(() => AdMob.showBanner({
+            adId: 'ca-app-pub-6842986503191598/9044947583',
+            adSize: BannerAdSize.ADAPTIVE_BANNER,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 0,
+          }))
+          .catch((err) => console.warn('AdMob banner failed to show:', err));
+      }
+    } catch (e) {
+      console.warn('AdMob not available:', e);
+    }
+  });
+</script>
 </body>
 </html>
