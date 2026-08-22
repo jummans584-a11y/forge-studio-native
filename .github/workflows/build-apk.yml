@@ -55,6 +55,21 @@ jobs:
       - name: Sync web assets into Android project
         run: npx cap sync android
 
+      - name: Add AdMob App ID to AndroidManifest.xml
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path) as f:
+              content = f.read()
+          meta = '        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-6842986503191598~6035640863"/>\n'
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in content:
+              content = re.sub(r'(<application[^>]*>)', r'\1\n' + meta, content, count=1)
+          with open(path, 'w') as f:
+              f.write(content)
+          print("AndroidManifest.xml patched")
+          PYEOF
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
