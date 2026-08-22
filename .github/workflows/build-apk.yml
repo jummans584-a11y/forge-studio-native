@@ -52,6 +52,9 @@ jobs:
       - name: Add Android platform (first time only, safe to repeat)
         run: npx cap add android || npx cap sync android
 
+      - name: Replace default app icon with Forge Studio logo
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#16171a' --iconBackgroundColorDark '#16171a'
+
       - name: Sync web assets into Android project
         run: npx cap sync android
 
