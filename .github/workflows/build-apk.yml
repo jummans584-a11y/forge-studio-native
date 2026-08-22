@@ -26,6 +26,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Restore persistent signing key (same key every build → updates install cleanly)
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
