@@ -11188,21 +11188,52 @@
   // Shows a real AdMob banner ad at the bottom of the app when running inside the packaged
   // Android app (Capacitor). Does nothing when opened as a plain website (Capacitor.Plugins won't
   // exist there) — that's expected, ads only work inside the installed APK.
+  //
+  // DIAGNOSTIC MODE: also shows an on-screen box reporting exactly what step it reached / failed
+  // at. This does NOT use the app's own toast() — that function lives inside the main app's private
+  // scope (an IIFE) and isn't reachable from this separate <script> tag, which caused a "toast is
+  // not a function" error the first time this was tried. This debugToast() is fully self-contained
+  // (creates its own element) so it works regardless of the main app's internal structure. Once ads
+  // are confirmed working, this whole <script> block's debug calls can be removed/simplified.
+  function admobDebugToast(msg) {
+    console.log('[AdMob debug]', msg);
+    let box = document.getElementById('admob-debug-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'admob-debug-box';
+      box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:rgba(20,20,25,0.95);color:#ffd479;font:12px/1.4 monospace;padding:8px 10px;border-radius:8px;max-height:40vh;overflow-y:auto;white-space:pre-wrap;box-shadow:0 2px 10px rgba(0,0,0,0.5);';
+      document.body.appendChild(box);
+    }
+    const line = document.createElement('div');
+    line.textContent = '• ' + msg;
+    box.appendChild(line);
+  }
   window.addEventListener('load', () => {
     try {
-      if (window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob) {
-        const { AdMob, BannerAdPosition, BannerAdSize } = Capacitor.Plugins.AdMob;
-        AdMob.initialize({ initializeForTesting: false })
-          .then(() => AdMob.showBanner({
+      if (!window.Capacitor) {
+        admobDebugToast('window.Capacitor is missing — Capacitor bridge did not load (expected if opened as a plain webpage).');
+        return;
+      }
+      if (!Capacitor.Plugins || !Capacitor.Plugins.AdMob) {
+        admobDebugToast('Capacitor loaded but AdMob plugin is missing — plugin not bundled into this build.');
+        return;
+      }
+      const { AdMob, BannerAdPosition, BannerAdSize } = Capacitor.Plugins.AdMob;
+      admobDebugToast('Plugin found, initializing…');
+      AdMob.initialize({ initializeForTesting: false })
+        .then(() => {
+          admobDebugToast('Initialized OK, requesting banner…');
+          return AdMob.showBanner({
             adId: 'ca-app-pub-6842986503191598/9044947583',
             adSize: BannerAdSize.ADAPTIVE_BANNER,
             position: BannerAdPosition.BOTTOM_CENTER,
             margin: 0,
-          }))
-          .catch((err) => console.warn('AdMob banner failed to show:', err));
-      }
+          });
+        })
+        .then(() => admobDebugToast('showBanner() succeeded.'))
+        .catch((err) => admobDebugToast('FAILED — ' + (err && (err.message || err.code || JSON.stringify(err)))));
     } catch (e) {
-      console.warn('AdMob not available:', e);
+      admobDebugToast('exception — ' + e.message);
     }
   });
 </script>
