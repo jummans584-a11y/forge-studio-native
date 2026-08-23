@@ -11218,15 +11218,18 @@
         admobDebugToast('Capacitor loaded but AdMob plugin is missing — plugin not bundled into this build.');
         return;
       }
-      const { AdMob, BannerAdPosition, BannerAdSize } = Capacitor.Plugins.AdMob;
+      const AdMob = Capacitor.Plugins.AdMob; // this IS the plugin — no nested .AdMob to destructure
+      // BannerAdPosition/BannerAdSize are JS-only enum objects from the npm package; the
+      // auto-generated native plugin proxy (Capacitor.Plugins.AdMob) doesn't carry them, so we use
+      // their known literal string values directly instead of trying to import them.
       admobDebugToast('Plugin found, initializing…');
       AdMob.initialize({ initializeForTesting: false })
         .then(() => {
           admobDebugToast('Initialized OK, requesting banner…');
           return AdMob.showBanner({
             adId: 'ca-app-pub-6842986503191598/9044947583',
-            adSize: BannerAdSize.ADAPTIVE_BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
+            adSize: 'ADAPTIVE_BANNER',
+            position: 'BOTTOM_CENTER',
             margin: 0,
           });
         })
