@@ -11188,7 +11188,12 @@
     if (!box) {
       box = document.createElement('div');
       box.id = 'admob-debug-box';
-      box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:rgba(20,20,25,0.95);color:#ffd479;font:12px/1.4 monospace;padding:8px 10px;border-radius:8px;max-height:40vh;overflow-y:auto;white-space:pre-wrap;box-shadow:0 2px 10px rgba(0,0,0,0.5);';
+      box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:rgba(20,20,25,0.95);color:#ffd479;font:12px/1.4 monospace;padding:8px 30px 8px 10px;border-radius:8px;max-height:40vh;overflow-y:auto;white-space:pre-wrap;box-shadow:0 2px 10px rgba(0,0,0,0.5);';
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:none;color:#ffd479;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px;';
+      closeBtn.onclick = () => box.remove();
+      box.appendChild(closeBtn);
       document.body.appendChild(box);
     }
     const line = document.createElement('div');
@@ -11213,17 +11218,24 @@
       AdMob.initialize({ initializeForTesting: false })
         .then(() => {
           admobDebugToast('Initialized OK, checking consent…');
-          // GDPR/UMP consent flow. In EEA/UK, ads must not be requested until the user has
-          // responded to the consent form (or consent isn't required for their region — most
-          // users worldwide won't see a form at all, this just checks first). Everyone else
-          // (canRequestAds === true right away) sails through with no visible change.
-          return AdMob.requestConsentInfo();
+          // GDPR/UMP consent flow. This ONLY works once a Privacy & Messaging form is configured
+          // in the AdMob console for this app — until then requestConsentInfo() itself throws
+          // "Publisher misconfiguration". That's a console-side setup step, not a code bug, so we
+          // don't let a failure here block ads: catch locally and treat it as "no consent gate",
+          // same as if the console call had said consent isn't required.
+          return AdMob.requestConsentInfo().catch((err) => {
+            admobDebugToast('Consent check skipped — ' + (err && (err.message || err.code || JSON.stringify(err))));
+            return { canRequestAds: true, isConsentFormAvailable: false, status: 'NOT_REQUIRED' };
+          });
         })
         .then((consentInfo) => {
           admobDebugToast('Consent status: ' + JSON.stringify(consentInfo));
           if (consentInfo.isConsentFormAvailable && consentInfo.status === 'REQUIRED') {
             admobDebugToast('Consent form required, showing it…');
-            return AdMob.showConsentForm();
+            return AdMob.showConsentForm().catch((err) => {
+              admobDebugToast('showConsentForm failed, continuing anyway — ' + (err && (err.message || err.code || JSON.stringify(err))));
+              return consentInfo;
+            });
           }
           return consentInfo;
         })
