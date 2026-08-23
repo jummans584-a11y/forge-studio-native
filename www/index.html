@@ -1088,7 +1088,6 @@
         <span id="assetLibraryCount"></span>
       </div>
       <div id="assetLibraryHeaderBtns">
-        <button class="btn" id="assetLibraryUnlockBtn" title="Unlimited library storage — watch a short ad to unlock permanently">🔓 Unlock unlimited</button>
         <button class="btn" id="assetLibraryOptimizeBtn" title="When on, models you pick are auto-decimated (lighter, faster to scatter) — no prompt each time">⚡ Optimize</button>
         <button class="btn" id="assetLibrarySelectBtn">☑ Select</button>
         <button class="btn" id="assetLibraryPickBtn" title="OFF: every tap (library card or model on the map) just uses/places the whole thing directly, no popup. ON: tap a multi-item pack's card, or any model already on the map, to pick/save one piece from it">🎯 Pick part</button>
@@ -1517,7 +1516,6 @@
   const assetLibrarySearch = document.getElementById('assetLibrarySearch');
   const assetLibrarySelectBtn = document.getElementById('assetLibrarySelectBtn');
   const assetLibraryOptimizeBtn = document.getElementById('assetLibraryOptimizeBtn');
-  const assetLibraryUnlockBtn = document.getElementById('assetLibraryUnlockBtn');
   const assetLibrarySelectBar = document.getElementById('assetLibrarySelectBar');
   const assetLibrarySelectCount = document.getElementById('assetLibrarySelectCount');
   const assetVariantPrompt = document.getElementById('assetVariantPrompt');
@@ -2403,16 +2401,9 @@
       .catch((err) => console.warn('Loading interstitial failed (spinner still shows normally):', err));
   }
 
-  const FREE_LIBRARY_LIMIT = 20; // free-tier cap on how many models can be saved in the Asset Library
-  function libraryHasRoomFor(n) { return (libraryAssets.length + n) <= (FREE_LIBRARY_LIMIT + getLibraryBonusSlots()); }
-  function showLibraryLimitPrompt() {
-    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
-    toast('Library is full (' + cap + ' slots used up) — watch a short ad for +' + LIBRARY_CREDIT_PER_AD + ' more slots.', 3400);
-    showRewardedAdToUnlock('+' + LIBRARY_CREDIT_PER_AD + ' library slots unlocked!', LIBRARY_REWARDED_AD_ID, () => {
-      addLibraryBonusSlots(LIBRARY_CREDIT_PER_AD);
-      renderAssetLibraryGrid();
-    });
-  }
+  const FREE_LIBRARY_LIMIT = 20; // kept only for reference — no longer enforced, see libraryHasRoomFor below
+  function libraryHasRoomFor(n) { return true; } // library cap removed — unlimited storage
+  function showLibraryLimitPrompt() {} // no-op now that there's no cap to hit
 
   const FREE_TEX_SIZE = 2048, PREMIUM_TEX_SIZE = 4096;
   let tex4kUnlockedThisSession = false; // resets on every app/page reload — see note above
@@ -4437,7 +4428,6 @@
     libraryUseOptimized = !libraryUseOptimized;
     assetLibraryOptimizeBtn.classList.toggle('active', libraryUseOptimized);
   };
-  assetLibraryUnlockBtn.onclick = () => showLibraryLimitPrompt();
 
   // Small popup shown after tapping a card in the picker (only when picking for placement) —
   // lets the user choose the full-detail original or a decimated "optimized" copy before it's
@@ -4834,10 +4824,7 @@
   function renderAssetLibraryGrid() {
     renderAssetLibraryFilters();
     assetLibraryGrid.innerHTML = '';
-    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
-    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device') +
-      ' — ' + Math.max(0, cap - libraryAssets.length) + '/' + cap + ' slots left';
-    if (assetLibraryUnlockBtn) assetLibraryUnlockBtn.textContent = '🔓 +' + LIBRARY_CREDIT_PER_AD + ' slots (watch ad)';
+    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device');
     if (!libraryReady) {
       const p = document.createElement('p'); p.style.cssText = 'grid-column:1/-1;font-size:12px;color:var(--ink-dim);text-align:center;padding:30px 10px;';
       p.textContent = 'Loading your library…';
@@ -11225,7 +11212,27 @@
       admobDebugToast('Plugin found, initializing…');
       AdMob.initialize({ initializeForTesting: false })
         .then(() => {
-          admobDebugToast('Initialized OK, requesting banner…');
+          admobDebugToast('Initialized OK, checking consent…');
+          // GDPR/UMP consent flow. In EEA/UK, ads must not be requested until the user has
+          // responded to the consent form (or consent isn't required for their region — most
+          // users worldwide won't see a form at all, this just checks first). Everyone else
+          // (canRequestAds === true right away) sails through with no visible change.
+          return AdMob.requestConsentInfo();
+        })
+        .then((consentInfo) => {
+          admobDebugToast('Consent status: ' + JSON.stringify(consentInfo));
+          if (consentInfo.isConsentFormAvailable && consentInfo.status === 'REQUIRED') {
+            admobDebugToast('Consent form required, showing it…');
+            return AdMob.showConsentForm();
+          }
+          return consentInfo;
+        })
+        .then((consentInfo) => {
+          if (consentInfo.canRequestAds === false) {
+            admobDebugToast('User has not granted consent — ads will not be requested.');
+            return Promise.reject(new Error('no-consent'));
+          }
+          admobDebugToast('Consent OK, requesting banner…');
           return AdMob.showBanner({
             adId: 'ca-app-pub-6842986503191598/9044947583',
             adSize: 'ADAPTIVE_BANNER',
@@ -11234,7 +11241,10 @@
           });
         })
         .then(() => admobDebugToast('showBanner() succeeded.'))
-        .catch((err) => admobDebugToast('FAILED — ' + (err && (err.message || err.code || JSON.stringify(err)))));
+        .catch((err) => {
+          if (err && err.message === 'no-consent') return;
+          admobDebugToast('FAILED — ' + (err && (err.message || err.code || JSON.stringify(err))));
+        });
     } catch (e) {
       admobDebugToast('exception — ' + e.message);
     }
