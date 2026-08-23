@@ -15,23 +15,32 @@
 <meta name="apple-mobile-web-app-title" content="Forge Studio" />
 <link rel="apple-touch-icon" href="./icon-180.png" />
 <link rel="icon" href="./icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --bg: #131418;
-    --panel: #1c1e23;
-    --panel-2: #262931;
-    --panel-3: #2f323c;
+    --bg: #0b0c0f;
+    --panel: #16171c;
+    --panel-2: #1e2027;
+    --panel-3: #282b34;
     --line: #34373f;
     --line-soft: #24262c;
-    --ink: #f0f1f4;
-    --ink-dim: #999da8;
+    --line-hi: rgba(255,255,255,0.09);
+    --ink: #f5f5f8;
+    --ink-dim: #9a9ea8;
     --ink-faint: #6c7078;
-    --accent: #ff7a3d;
-    --accent-2: #ffb27a;
+    --accent: #ff8a4c;
+    --accent-2: #ffc98a;
+    --accent-3: #e2632a;
     --accent-dim: #5a3a2b;
-    --accent-glow: rgba(255,122,61,0.32);
-    --green: #4a8f6a;
-    --green-glow: rgba(74,143,106,0.3);
+    --accent-glow: rgba(255,138,76,0.35);
+    --accent-grad: linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%);
+    --accent-grad-soft: linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08));
+    --gloss-hi: rgba(255,255,255,0.14);
+    --green: #52a67c;
+    --green-glow: rgba(82,166,124,0.3);
+    --green-grad: linear-gradient(135deg, #6bc196, #3f8a63);
     --danger: #ff6b6b;
     --danger-dim: #4a2a2a;
     --warn: #e0a458;
@@ -39,9 +48,12 @@
     --r-md: 12px;
     --r-lg: 16px;
     --r-pill: 999px;
-    --shadow-sm: 0 2px 6px rgba(0,0,0,0.25);
-    --shadow-md: 0 6px 18px rgba(0,0,0,0.32);
-    --shadow-lg: 0 -8px 28px rgba(0,0,0,0.4);
+    --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-sm: 0 3px 10px rgba(0,0,0,0.28), 0 1px 2px rgba(0,0,0,0.35);
+    --shadow-md: 0 8px 24px rgba(0,0,0,0.38), 0 2px 6px rgba(0,0,0,0.3);
+    --shadow-lg: 0 -14px 38px rgba(0,0,0,0.48);
+    --font-display: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   @media (prefers-reduced-motion: reduce) {
@@ -55,9 +67,12 @@
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
     background: var(--bg); color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     touch-action: none;
   }
+  b, strong, .title b, h1, h2 { font-family: var(--font-display); letter-spacing: 0.01em; }
   #app { position: relative; width: 100%; height: 100%; }
   #canvas-wrap { position: absolute; inset: 0; }
   canvas#three { display: block; width: 100%; height: 100%; touch-action: none; }
@@ -73,6 +88,16 @@
   #topbar * { pointer-events: auto; }
   .title { font-size: 12px; letter-spacing: 0.03em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .title b { color: var(--ink); font-weight: 600; }
+  /* The topbar's icon buttons (undo/redo/projects/library/lighting/exposure/wireframe/snapshot/
+     reset-view) used to just sit in the same nowrap flex row as the workspace tabs and title —
+     fine on a wide screen, but on a narrow portrait phone there isn't room for all of it, so the
+     buttons that didn't fit were spilling past the edge of the screen and getting clipped by the
+     page's own overflow:hidden with no way to reach them at all. This group now scrolls on its
+     own (same pattern as .tabchips below) so every button stays reachable with a swipe, and
+     min-width:0 is what lets it actually shrink to fit instead of pushing the topbar wider than
+     the screen. */
+  #topbar-tools { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex-shrink: 1; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding: 2px 1px; }
+  #topbar-tools .iconbtn { scroll-snap-align: end; }
 
   #workspace-tabs { display: flex; background: var(--panel-2); border-radius: var(--r-md); padding: 2px; gap: 2px; border: 1px solid var(--line); }
   #workspace-tabs button { border: none; background: transparent; color: var(--ink-dim); padding: 6px 10px; border-radius: var(--r-sm); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
@@ -85,6 +110,13 @@
     font-size: 13px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
   }
   .iconbtn:active { background: var(--accent-dim); border-color: var(--accent); transform: scale(0.93); }
+
+  /* Real vector icons in place of emoji glyphs — emoji render inconsistently (missing/tofu glyphs
+     on some Android WebViews, different art style per OS/font), so every button icon is swapped at
+     runtime for a small inline SVG in a consistent line-art style. See iconizeButton() in the main
+     script. Sized off the button's own font-size so it drops into existing layouts unchanged. */
+  .btn-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .btn-ic svg { width: 1.2em; height: 1.2em; stroke: currentColor; vertical-align: -0.22em; }
 
   #gizmoBar {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
@@ -331,16 +363,16 @@
   }
   input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
   input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%;
-    background: var(--accent); border: 3px solid var(--panel); margin-top: -7.5px;
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--panel); margin-top: -4.5px;
     box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
     transition: transform 0.12s ease;
   }
   input[type=range]:active::-webkit-slider-thumb { transform: scale(1.15); }
   input[type=range]::-moz-range-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
   input[type=range]::-moz-range-thumb {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--accent);
-    border: 3px solid var(--panel); box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+    border: 2px solid var(--panel); box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
   }
   input[type=range]:disabled::-webkit-slider-thumb { background: var(--ink-faint); box-shadow: none; }
 
@@ -366,25 +398,40 @@
   /* Colorful custom slider — proportional accent-orange fill up to the thumb (driven by the
      --fill custom property mkSlider() keeps in sync with the value), plus a bigger, easier-to-grab
      thumb than the default browser slider. */
+  /* Colorful custom slider — gradient accent fill up to the thumb (driven by the --fill custom
+     property mkSlider() keeps in sync with the value) leading into a glowing "dot" thumb: a bright
+     gradient core wrapped in a soft halo (layered box-shadow) that pulses gently so every slider in
+     the app — the single most-used control here — reads as alive and premium, not a flat OS default. */
+  @keyframes sliderThumbGlow {
+    0%, 100% { box-shadow: 0 0 0 5px rgba(255,138,76,0.14), 0 0 10px 2px var(--accent-glow), 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.55); }
+    50%      { box-shadow: 0 0 0 7px rgba(255,138,76,0.20), 0 0 18px 5px var(--accent-glow), 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.55); }
+  }
   input[type="range"] {
     -webkit-appearance: none; appearance: none;
     width: 100%; height: 24px; background: transparent; margin: 0; cursor: pointer; --fill: 50%;
   }
   input[type="range"]::-webkit-slider-runnable-track {
     height: 6px; border-radius: var(--r-pill);
-    background: linear-gradient(to right, var(--accent) var(--fill), var(--panel-3) var(--fill));
+    background: linear-gradient(to right, #ffb066 0%, var(--accent) var(--fill), var(--panel-3) var(--fill));
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.35);
   }
   input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7px;
-    border-radius: 50%; background: var(--ink); border: 3px solid var(--accent);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4); transition: transform 0.1s ease;
+    -webkit-appearance: none; width: 13px; height: 13px; margin-top: -3.5px;
+    border-radius: 50%; border: none;
+    background: radial-gradient(circle at 34% 30%, #fff 0%, var(--accent-2) 45%, var(--accent) 100%);
+    animation: sliderThumbGlow 2.2s ease-in-out infinite;
+    transition: transform 0.12s ease;
   }
-  input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.18); }
-  input[type="range"]::-moz-range-track { height: 6px; border-radius: var(--r-pill); background: var(--panel-3); }
-  input[type="range"]::-moz-range-progress { height: 6px; border-radius: var(--r-pill); background: var(--accent); }
+  input[type="range"]:active::-webkit-slider-thumb, input[type="range"]:focus-visible::-webkit-slider-thumb { transform: scale(1.25); }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: var(--r-pill); background: var(--panel-3); box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
+  input[type="range"]::-moz-range-progress { height: 6px; border-radius: var(--r-pill); background: linear-gradient(to right, #ffb066, var(--accent)); }
   input[type="range"]::-moz-range-thumb {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--ink); border: 3px solid var(--accent);
-    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    width: 13px; height: 13px; border-radius: 50%; border: none;
+    background: radial-gradient(circle at 34% 30%, #fff 0%, var(--accent-2) 45%, var(--accent) 100%);
+    animation: sliderThumbGlow 2.2s ease-in-out infinite;
+  }
+  input[type="range"]:disabled::-webkit-slider-thumb, input[type="range"]:disabled::-moz-range-thumb {
+    animation: none; background: var(--ink-faint); box-shadow: none;
   }
 
   /* Two sliders per row, each in its own small card — brings related controls (e.g. Mountain's
@@ -814,6 +861,140 @@
   #settingsCloseBtn { width: 100%; margin-top: 14px; }
 
   input[type=file] { display: none; }
+
+  /* ============================================================
+     PREMIUM PASS — shared-token restyle. Every tool in this app is built
+     from the same handful of classes (.btn, .iconbtn, .toolbar-primary,
+     .tabchip, .catchip, .seg, .field, gizmo/vp bars, sheets, modals), so
+     lifting those once gives every panel a consistent premium finish
+     without touching per-tool markup or logic.
+  ============================================================ */
+  #app {
+    background:
+      radial-gradient(circle at 15% -10%, rgba(255,138,76,0.07), transparent 45%),
+      radial-gradient(circle at 100% 110%, rgba(255,138,76,0.05), transparent 40%);
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: var(--r-pill); }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+  #topbar {
+    background: linear-gradient(to bottom, rgba(14,15,18,0.96), rgba(14,15,18,0));
+    backdrop-filter: blur(10px);
+  }
+  .title { font-family: var(--font-display); font-weight: 600; }
+
+  #workspace-tabs { background: linear-gradient(180deg, var(--panel-3), var(--panel-2)); box-shadow: var(--shadow-xs), inset 0 1px 0 var(--line-hi); }
+  #workspace-tabs button.active { background: var(--accent-grad); color: #201004; box-shadow: 0 3px 10px var(--accent-glow), inset 0 1px 0 var(--gloss-hi); font-weight: 700; }
+
+  .iconbtn, .toolbar-primary button, .toolbar-secondary button, .tabchip, .catchip,
+  #assetLibraryFilters button, .settings-row button, .proj-actions button,
+  #gizmoBar button, .vp-float-bar button, .seg button {
+    background: linear-gradient(180deg, var(--panel-2), var(--panel-3));
+    box-shadow: var(--shadow-xs), inset 0 1px 0 var(--line-hi);
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease, color 0.15s ease;
+  }
+  .iconbtn:active, .toolbar-primary button:active, .toolbar-secondary button:active,
+  .tabchip:active, .catchip:active, #gizmoBar button:active, .vp-float-bar button:active {
+    transform: scale(0.94);
+  }
+
+  .btn.primary, .toolbar-primary button.active, .toolbar-secondary button.active,
+  .tabchip.active, .catchip.active, .seg button.active, #gizmoBar button.active,
+  .vp-float-bar button.active, #assetLibraryFilters button.active,
+  #assetLibraryHeaderBtns .btn.active {
+    background: var(--accent-grad) !important;
+    box-shadow: 0 3px 12px var(--accent-glow), inset 0 1px 0 var(--gloss-hi) !important;
+    color: #201004 !important;
+    border-color: transparent !important;
+  }
+  .catchip.active { color: var(--ink) !important; background: var(--accent-grad-soft) !important; border-color: var(--accent) !important; box-shadow: none !important; }
+  .btn.green { background: var(--green-grad); box-shadow: 0 3px 12px var(--green-glow), inset 0 1px 0 var(--gloss-hi); }
+
+  .btn {
+    font-family: var(--font-display); font-weight: 600; letter-spacing: 0.01em;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel-3));
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--line-hi);
+  }
+  .btn:active { transform: scale(0.96); }
+
+  .sec-label::before { background: var(--accent-grad); box-shadow: 0 0 6px var(--accent-glow); }
+
+  .field {
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-3));
+    box-shadow: var(--shadow-xs), inset 0 1px 0 var(--line-hi);
+  }
+  .field .flabel .fval { text-shadow: 0 0 10px var(--accent-glow); }
+
+  #dock-sheet {
+    background: linear-gradient(180deg, var(--panel), #131419);
+    box-shadow: var(--shadow-lg), inset 0 1px 0 var(--line-hi);
+    backdrop-filter: blur(16px);
+  }
+  #dock-sheet.landscape { box-shadow: 8px 0 28px rgba(0,0,0,0.45), inset 0 1px 0 var(--line-hi); }
+  #dock-handle-bar { background: linear-gradient(90deg, var(--ink-faint), var(--line)); }
+  #dock-handle-area:active #dock-handle-bar { background: var(--accent-grad); box-shadow: 0 0 8px var(--accent-glow); }
+
+  .asset-thumb, .proj-card, .objlist {
+    background: linear-gradient(160deg, var(--panel-2), var(--panel-3));
+    box-shadow: var(--shadow-sm), inset 0 1px 0 var(--line-hi);
+  }
+  .proj-card:active { box-shadow: var(--shadow-xs); }
+  .asset-card.active .asset-thumb, .proj-card.active { box-shadow: 0 0 0 2px var(--accent), 0 4px 14px var(--accent-glow); }
+  .objrow.selected { background: var(--accent-grad-soft); }
+
+  #compareModal, #assetLibraryModal, #projectsModal, #settingsModal, #onboardingOverlay {
+    backdrop-filter: blur(10px);
+  }
+  #onboardingBox, #settingsBox {
+    background: linear-gradient(165deg, var(--panel), #131419);
+    box-shadow: var(--shadow-md), inset 0 1px 0 var(--line-hi);
+  }
+  #onboardingBox h2, #settingsBox h2, #compareHeader b, #assetLibraryHeader b, #projectsHeader b, #homeBrandText b {
+    font-family: var(--font-display); font-weight: 700; letter-spacing: 0.01em;
+  }
+
+  #homeLogoMark {
+    background: var(--accent-grad);
+    box-shadow: var(--shadow-md), inset 0 1px 0 var(--gloss-hi), inset 0 -6px 10px rgba(0,0,0,0.18);
+  }
+  #homeScreen {
+    background:
+      radial-gradient(circle at 20% 0%, rgba(255,138,76,0.13), transparent 55%),
+      radial-gradient(circle at 100% 100%, rgba(255,138,76,0.06), transparent 45%),
+      var(--bg);
+  }
+  #homeActions .btn:first-child, #homeFooterActions .btn:first-child { background: var(--accent-grad); box-shadow: 0 4px 14px var(--accent-glow), inset 0 1px 0 var(--gloss-hi); color: #201004; border-color: transparent; }
+
+  .spinner { border-top-color: var(--accent); border-right-color: var(--accent-2); box-shadow: 0 0 14px var(--accent-glow); }
+  #loading-bar-fill { background: var(--accent-grad); box-shadow: 0 0 8px var(--accent-glow); }
+
+  #toast, #undoToast {
+    background: linear-gradient(165deg, var(--panel-3), var(--panel-2));
+    box-shadow: var(--shadow-md), inset 0 1px 0 var(--line-hi);
+    backdrop-filter: blur(8px);
+  }
+  #undoToast button.utbtn { background: var(--accent-grad); box-shadow: 0 2px 8px var(--accent-glow); }
+
+  #statsbar, #exposure-panel { backdrop-filter: blur(10px); box-shadow: var(--shadow-xs); }
+  #gizmoBar, .vp-float-bar { backdrop-filter: blur(10px); box-shadow: var(--shadow-md), inset 0 1px 0 var(--line-hi); }
+
+  /* Rim light along the dock sheet's top edge — a thin warm hairline that sells "glass panel
+     catching light" rather than a flat rectangle sitting on the canvas. */
+  #dock-sheet::before {
+    content: ''; position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+    opacity: 0.6; pointer-events: none;
+  }
+  #dock-sheet.landscape::before { display: none; }
+
+  .swatch.active { box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px var(--accent), 0 0 10px 2px var(--accent-glow); }
+
+  #empty-state .glyph { filter: drop-shadow(0 0 22px var(--accent-glow)); }
+  #empty-state h1 { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.01em; }
+
+  .catdot { box-shadow: 0 0 0 2px rgba(0,0,0,0.25), 0 0 6px currentColor; }
 </style>
 </head>
 <body>
@@ -900,6 +1081,7 @@
         <span id="assetLibraryCount"></span>
       </div>
       <div id="assetLibraryHeaderBtns">
+        <button class="btn" id="assetLibraryUnlockBtn" title="Unlimited library storage — watch a short ad to unlock permanently">🔓 Unlock unlimited</button>
         <button class="btn" id="assetLibraryOptimizeBtn" title="When on, models you pick are auto-decimated (lighter, faster to scatter) — no prompt each time">⚡ Optimize</button>
         <button class="btn" id="assetLibrarySelectBtn">☑ Select</button>
         <button class="btn" id="assetLibraryPickBtn" title="OFF: every tap (library card or model on the map) just uses/places the whole thing directly, no popup. ON: tap a multi-item pack's card, or any model already on the map, to pick/save one piece from it">🎯 Pick part</button>
@@ -1028,17 +1210,19 @@
     </div>
     <div class="title" id="model-name-wrap" style="display:none;">· <b id="model-name">—</b></div>
     <div class="title" id="project-name-wrap" style="min-width:0;max-width:120px;">📁 <b id="project-name">Untitled project</b></div>
-    <div style="flex:1"></div>
-    <button class="iconbtn" id="btn-undo" title="Undo — works across every tool (sculpt, paint, objects, vegetation…)">↶</button>
-    <button class="iconbtn" id="btn-redo" title="Redo — works across every tool (sculpt, paint, objects, vegetation…)">↷</button>
-    <button class="iconbtn" id="btn-orbit-override" title="Orbit override — move the camera without leaving your current tool">🧭</button>
-    <button class="iconbtn" id="btn-projects" title="Projects — save / load / new">📁</button>
-    <button class="iconbtn" id="btn-asset-library" title="Asset Library — your saved models">📚</button>
-    <button class="iconbtn" id="btn-lighting" title="Cycle lighting">☀</button>
-    <button class="iconbtn" id="btn-exposure" title="Brightness / exposure">🔆</button>
-    <button class="iconbtn" id="btn-wireframe" title="Toggle wireframe">◻</button>
-    <button class="iconbtn" id="btn-snapshot" title="Save snapshot">📷</button>
-    <button class="iconbtn" id="btn-reset-view" title="Reset view">⤢</button>
+    <div style="flex:1;min-width:6px;"></div>
+    <div id="topbar-tools">
+      <button class="iconbtn" id="btn-undo" title="Undo — works across every tool (sculpt, paint, objects, vegetation…)">↶</button>
+      <button class="iconbtn" id="btn-redo" title="Redo — works across every tool (sculpt, paint, objects, vegetation…)">↷</button>
+      <button class="iconbtn" id="btn-orbit-override" title="Orbit override — move the camera without leaving your current tool">🧭</button>
+      <button class="iconbtn" id="btn-projects" title="Projects — save / load / new">📁</button>
+      <button class="iconbtn" id="btn-asset-library" title="Asset Library — your saved models">📚</button>
+      <button class="iconbtn" id="btn-lighting" title="Cycle lighting">☀</button>
+      <button class="iconbtn" id="btn-exposure" title="Brightness / exposure">🔆</button>
+      <button class="iconbtn" id="btn-wireframe" title="Toggle wireframe">◻</button>
+      <button class="iconbtn" id="btn-snapshot" title="Save snapshot">📷</button>
+      <button class="iconbtn" id="btn-reset-view" title="Reset view">⤢</button>
+    </div>
   </div>
 
   <div id="exposure-panel">
@@ -1135,6 +1319,190 @@
     input.value = '';
     input.click();
   }
+
+  // ============================================================
+  // BUTTON ICONS — replaces emoji glyphs on every <button> with a small inline-SVG line icon.
+  // Emoji were used as quick placeholder icons everywhere, but they render inconsistently (missing/
+  // "tofu" boxes on some Android WebViews — exactly what a packaged APK build runs in — and a
+  // different art style per OS), and a few glyphs were reused for unrelated meanings (💧 for both
+  // "Water" and the color "Picker" tool), making it hard to tell at a glance what a button does.
+  // This scans every button's own text (falling back to its title attribute for icon-only buttons)
+  // and swaps each known glyph for a matching line icon, leaving any visible label text in place.
+  // Runs once at startup and again — via MutationObserver — every time the dock/modals rebuild
+  // their buttons, so new buttons created later (sliders' dock panels, asset library grid, etc.)
+  // get iconized automatically without every call site needing to know about this.
+  function svgIcon(inner) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  }
+  const BTN_ICONS = {
+    '↶': svgIcon('<path d="M9 7 4 12l5 5"/><path d="M4 12h11a5 5 0 0 1 0 10h-1"/>'),
+    '↷': svgIcon('<path d="M15 7l5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/>'),
+    '↔': svgIcon('<path d="M8 8 4 12l4 4M16 8l4 4-4 4M4 12h16"/>'),
+    '🧭': svgIcon('<circle cx="12" cy="12" r="9"/><path d="m14.5 9.5-4.3.6-.7 4.4 4.3-.6z"/>'),
+    '📁': svgIcon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    '📚': svgIcon('<rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><path d="M16.5 5 20 6l-2 14-3.5-.8"/>'),
+    '☀': svgIcon('<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'),
+    '🔆': svgIcon('<circle cx="12" cy="12" r="4"/><path d="M12 8a4 4 0 0 0 0 8" fill="currentColor" stroke="none"/><path d="M12 3v2M12 19v2M5 5l1.4 1.4M17.6 17.6 19 19M3 12h2M19 12h2M5 19l1.4-1.4M17.6 6.4 19 5"/>'),
+    '◻': svgIcon('<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 9.3h16M4 14.7h16M9.3 4v16M14.7 4v16"/>'),
+    '📷': svgIcon('<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7l1.5-2.5h5L16 7"/><circle cx="12" cy="13.5" r="3.4"/>'),
+    '⤢': svgIcon('<path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6"/>'),
+    '↖': svgIcon('<path d="M6 6v11.5L10 14l2.5 5 2-1-2.5-5H17z"/>'),
+    '✋': svgIcon('<path d="M9 12V5a1.5 1.5 0 0 1 3 0v6M12 11V4a1.5 1.5 0 0 1 3 0v7M15 11.5V6a1.5 1.5 0 0 1 3 0v8c0 4-2.5 7-6.5 7S5 17.5 5 14v-2.5a1.4 1.4 0 0 1 2.7-.6L9 13"/>'),
+    '🔄': svgIcon('<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M17 4v4h-4M7 20v-4h4"/>'),
+    '🔍': svgIcon('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/>'),
+    '＋': svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>'),
+    '✚': svgIcon('<path d="M12 5v14M5 12h14"/>'),
+    '⟳': svgIcon('<path d="M4 12a8 8 0 1 1 3 6.2"/><path d="M4 17v-4h4"/>'),
+    '🎯': svgIcon('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".7" fill="currentColor" stroke="none"/>'),
+    '⚓': svgIcon('<circle cx="12" cy="5" r="2"/><path d="M12 7v13M7 13a5 5 0 0 0 10 0M5 13h3M16 13h3"/>'),
+    '🔒': svgIcon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+    '🔓': svgIcon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>'),
+    '👁': svgIcon('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.6"/>'),
+    '🚫': svgIcon('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.6"/><path d="M4 4l16 16"/>'),
+    '🗑': svgIcon('<path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M10 11v6M14 11v6"/>'),
+    '✕': svgIcon('<path d="M6 6l12 12M18 6 6 18"/>'),
+    '✏': svgIcon('<path d="M4 20l1-4L16 5l3 3L8 19l-4 1z"/><path d="M14 7l3 3"/>'),
+    '✎': svgIcon('<path d="M4 20l1-4L16 5l3 3L8 19l-4 1z"/><path d="M14 7l3 3"/>'),
+    '⧉': svgIcon('<rect x="4" y="8" width="12" height="12" rx="1.5"/><path d="M8 8V5a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-3"/>'),
+    '💾': svgIcon('<path d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>'),
+    '✓': svgIcon('<path d="M4 12.5l5 5L20 6"/>'),
+    '☑': svgIcon('<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 12.5l2.5 2.5L16 9"/>'),
+    '⚙': svgIcon('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M3 12h2.2M18.8 12H21M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6"/>'),
+    '⚡': svgIcon('<path d="M13 2 4 14h6l-1 8 9-12h-6z"/>'),
+    '📥': svgIcon('<path d="M12 3v11M8 10l4 4 4-4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>'),
+    '📤': svgIcon('<path d="M12 15V4M8 8l4-4 4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>'),
+    '⭳': svgIcon('<path d="M12 3v11M8 10l4 4 4-4"/><path d="M5 19h14"/>'),
+    '▶': svgIcon('<path d="M7 5v14l11-7z" fill="currentColor" stroke="none"/>'),
+    '■': svgIcon('<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>'),
+    '🎛': svgIcon('<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="16" cy="17" r="2"/>'),
+    '🎨': svgIcon('<path d="M12 21a9 9 0 1 1 0-18 8 8 0 0 1 8 8c0 2-1.2 3-3 3h-2a2 2 0 0 0-1.5 3.3c.4.5.2 1.2-.4 1.5-.4.2-.7.2-1.1.2z"/><circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="7.3" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/>'),
+    '🖌': svgIcon('<path d="M17 3c1.1 0 2 .9 2 2 0 2-2 3-4 5l-2 2-2-2 2-2c2-2 3-4 4-5z"/><path d="M13 10l-6 6-2 4 4-2 6-6"/>'),
+    '🖐': svgIcon('<path d="M9 12V5a1.5 1.5 0 0 1 3 0v6M12 11V4a1.5 1.5 0 0 1 3 0v7M15 11.5V6a1.5 1.5 0 0 1 3 0v8c0 4-2.5 7-6.5 7S5 17.5 5 14v-2.5a1.4 1.4 0 0 1 2.7-.6L9 13"/>'),
+    '🧹': svgIcon('<rect x="4.5" y="12.5" width="9" height="6" rx="1.4" transform="rotate(-24 9 15.5)"/><path d="M9.5 12 15 5a2 2 0 0 1 3 0l.5.5a2 2 0 0 1 0 3l-6.5 7"/>'),
+    '👆': svgIcon('<path d="M11 13V5a1.5 1.5 0 0 1 3 0v7M14 12V7a1.5 1.5 0 0 1 3 0v6M17 13a1.5 1.5 0 0 1 3 0v3c0 3.5-2.5 6-6 6h-1c-2 0-3-.7-4-2l-3.3-4.4a1.4 1.4 0 0 1 2-2L10 16"/>'),
+    '🪣': svgIcon('<path d="M5 9h14l-1.5 9a2 2 0 0 1-2 1.7H8.5a2 2 0 0 1-2-1.7z"/><path d="M8 9a4 4 0 0 1 8 0"/>'),
+    '📋': svgIcon('<rect x="6" y="4" width="12" height="17" rx="1.5"/><rect x="9" y="2.5" width="6" height="3" rx="1"/>'),
+    '💧': svgIcon('<path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/>'),
+    '🖼': svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-4 4-3-3-6 6"/>'),
+    '⛰': svgIcon('<path d="M3 19 9 8l4 6 2-3 6 8z"/>'),
+    '🏔': svgIcon('<path d="M3 19 9 8l4 6 2-3 6 8z"/><path d="M8.3 10.5 6.6 13h3.4z" fill="currentColor" stroke="none"/>'),
+    '🧍': svgIcon('<circle cx="12" cy="5.5" r="2.5"/><path d="M8 21l1.5-8h5L16 21M9 13l-2-5h10l-2 5"/>'),
+    '🐔': svgIcon('<path d="M4 20 14 10"/><path d="M13.3 9.3l2-2 2 2-2 2z" fill="currentColor" stroke="none"/><path d="M17 4v2M20.5 7.5h2M15.3 3.3l1 1M20 4l1 1"/>'),
+    '⚒': svgIcon('<path d="M5 5l5 5M3 21l7-7"/><path d="M14 3l7 7-3.5 3.5L14 10z"/>'),
+    '🚶': svgIcon('<circle cx="13" cy="4.5" r="2"/><path d="M12 7l-2 4 3 2-1 8M13 11l3 1 2-2M10 11l-3 2 1 4"/>'),
+    '🏃': svgIcon('<circle cx="14" cy="4.5" r="2"/><path d="M9 9l4-2 2 3 4-1M11 10l-4 3 1 8M13 12l3 2-1 5"/>'),
+    '🌾': svgIcon('<path d="M12 21V9M12 9c-2-2-2-5-1-7 2 1 3 3 3 5M12 9c2-2 2-5 1-7-2 1-3 3-3 5M9 13c-1.5-.5-2.5-2-2.5-3.5M15 13c1.5-.5 2.5-2 2.5-3.5"/>'),
+    '🌊': svgIcon('<path d="M3 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 19c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/>'),
+    '🛣': svgIcon('<path d="M8 3 4 21M16 3l4 18"/><path d="M12 6v2M12 11v2M12 16v2"/>'),
+    '🌲': svgIcon('<path d="M12 2 6 11h3l-4 6h4l-3 5h12l-3-5h4l-4-6h3z"/><path d="M11.5 24v-2"/>'),
+    '🌴': svgIcon('<path d="M12 22V11"/><path d="M12 11c-3-3-7-2-9-1 1 3 5 4 9 1zM12 11c3-3 7-2 9-1-1 3-5 4-9 1zM12 11c-1-3 0-6 2-8-3 0-5 2-2 8z"/>'),
+    '🌿': svgIcon('<path d="M12 21c0-8 3-12 8-14-1 7-3 11-8 14zM12 21c0-6-2-9-6-11 0 5 2 9 6 11z"/>'),
+    '🌸': svgIcon('<circle cx="12" cy="12" r="2.1"/><circle cx="12" cy="7" r="2.1"/><circle cx="12" cy="17" r="2.1"/><circle cx="7" cy="12" r="2.1"/><circle cx="17" cy="12" r="2.1"/>'),
+    '🪨': svgIcon('<path d="M4 16c0-3 3-4 4-6s3-3 6-2 5 3 6 5-1 5-4 5H8c-2 0-4-1-4-2z"/>'),
+    '🏠': svgIcon('<path d="M4 11 12 4l8 7"/><path d="M6 10v10h12V10"/><path d="M10 20v-5h4v5"/>'),
+    '🧱': svgIcon('<rect x="3" y="5" width="8" height="5"/><rect x="13" y="5" width="8" height="5"/><rect x="3" y="14" width="8" height="5"/><rect x="13" y="14" width="8" height="5"/>'),
+    '🚗': svgIcon('<path d="M4 16l1.5-5a2 2 0 0 1 2-1.4h9a2 2 0 0 1 2 1.4L20 16"/><rect x="3" y="16" width="18" height="4" rx="1.5"/><circle cx="7.5" cy="20" r="1.4"/><circle cx="16.5" cy="20" r="1.4"/>'),
+    '🎲': svgIcon('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.3" cy="8.3" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.7" cy="8.3" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="8.3" cy="15.7" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.7" cy="15.7" r="1.1" fill="currentColor" stroke="none"/>'),
+    '➜': svgIcon('<path d="M4 12h14M13 6l6 6-6 6"/>'),
+    // Extra glyphs below give every remaining icon in the app (slider field icons, category
+    // badges, asset-part rows, etc.) the same 3D line-icon treatment as the tree glyph above,
+    // instead of falling back to inconsistent native emoji.
+    '🌳': svgIcon('<path d="M12 2 6 11h3l-4 6h4l-3 5h12l-3-5h4l-4-6h3z"/><path d="M11.5 24v-2"/>'),
+    '🔹': svgIcon('<path d="M12 3 5 12l7 9 7-9z"/>'),
+    '📦': svgIcon('<path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v9l9 5 9-5V8"/><path d="M12 13v9"/>'),
+    '📐': svgIcon('<path d="M4 20h16L4 4z"/><path d="M8 20v-3M12 20v-5M16 20v-7"/>'),
+    '🌗': svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>'),
+    '🫧': svgIcon('<circle cx="10" cy="12" r="5"/><circle cx="17" cy="8" r="2.5"/><circle cx="16" cy="17" r="2"/>'),
+    '⚖': svgIcon('<path d="M12 3v18M7 21h10"/><path d="M4 8h6M14 8h6"/><path d="M4 8l-2.5 5a2.5 2.5 0 0 0 5 0zM20 8l-2.5 5a2.5 2.5 0 0 0 5 0z"/>'),
+    '🔳': svgIcon('<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>'),
+    '🔁': svgIcon('<path d="M17 2 21 6l-4 4"/><path d="M3 12v-2a4 4 0 0 1 4-4h14"/><path d="M7 22 3 18l4-4"/><path d="M21 12v2a4 4 0 0 1-4 4H3"/>'),
+    '💪': svgIcon('<path d="M6 20V10a3 3 0 0 1 3-3c1 0 1.6.4 2 1l1 1.5c1 1.5 3 1.5 4 0a2 2 0 0 1 3.5 2c0 3-2 6-5 7l-2 .5"/><path d="M6 14H4"/>'),
+    '📏': svgIcon('<rect x="3" y="9" width="18" height="6" rx="1"/><path d="M7 9v2.5M11 9v2.5M15 9v2.5"/>'),
+    '🔺': svgIcon('<path d="M12 4 21 20H3z"/>'),
+    '🌐': svgIcon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>'),
+    '⭕': svgIcon('<circle cx="12" cy="12" r="8"/>'),
+    '📉': svgIcon('<path d="M3 6l6 6 4-4 8 8"/><path d="M15 16h6v-6"/>'),
+    '🌫': svgIcon('<path d="M4 9h13M4 13h16M4 17h11"/>'),
+    '🪜': svgIcon('<path d="M7 2v20M17 2v20"/><path d="M7 6h10M7 11h10M7 16h10"/>'),
+    '⬇': svgIcon('<path d="M12 4v14"/><path d="M6 13l6 6 6-6"/>'),
+    '⬆': svgIcon('<path d="M12 20V6"/><path d="M6 11l6-6 6 6"/>'),
+    '🔲': svgIcon('<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1" fill="currentColor" stroke="none"/>'),
+    '🔘': svgIcon('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>'),
+    '🧽': svgIcon('<rect x="4" y="8" width="16" height="10" rx="3"/><path d="M7 8c0-2 1-4 3-4M12 8c0-2.5 1.5-5 4-5"/>'),
+    '📍': svgIcon('<path d="M12 21s7-7.5 7-12a7 7 0 0 0-14 0c0 4.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.3"/>'),
+    '🧬': svgIcon('<path d="M7 3c0 5 10 5 10 10s-10 5-10 10M17 3c0 5-10 5-10 10s10 5 10 10"/><path d="M8 7h8M8 17h8"/>'),
+    '✨': svgIcon('<path d="M12 3l1.5 5L18 9l-4.5 1L12 15l-1.5-5L6 9l4.5-1z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
+    '↕': svgIcon('<path d="M12 3v18"/><path d="M8 7l4-4 4 4M8 17l4 4 4-4"/>'),
+    '🗺': svgIcon('<path d="M9 4 4 6v14l5-2 6 2 5-2V4l-5 2-6-2z"/><path d="M9 4v14M15 6v14"/>'),
+  };
+  // Strips the invisible variation-selector (️) some emoji are written with (e.g. ⛰️, ↔️) so both
+  // the plain and "presentation" forms of the same glyph resolve to the same line icon above.
+  function glyphSVG(ch) {
+    if (!ch) return null;
+    const stripped = String(ch).replace(/\uFE0F/g, '');
+    return BTN_ICONS[stripped] || BTN_ICONS[ch] || null;
+  }
+  // 💧 is the one glyph genuinely reused for two unrelated meanings in the source (a water tool and
+  // a color eyedropper) — resolved by keyword, everything else is a plain 1:1 glyph swap.
+  function resolveBtnIcon(ch, label) {
+    if (ch === '💧' && /pick/i.test(label)) {
+      return svgIcon('<path d="M4 20l4-1 9-9-3-3-9 9z"/><path d="M14 6l3-3 3 3-3 3"/>');
+    }
+    return BTN_ICONS[ch] || null;
+  }
+  const BTN_ICON_RE = /[\u{2190}-\u{2BFF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFF0B]/u;
+  function iconizeButton(btn) {
+    const label = (btn.title || '') + ' ' + btn.textContent;
+    if (!BTN_ICON_RE.test(label)) return;
+    const walker = document.createTreeWalker(btn, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(node => {
+      const text = node.nodeValue;
+      if (!BTN_ICON_RE.test(text)) return;
+      const frag = document.createDocumentFragment();
+      let buf = '', changed = false;
+      for (const ch of Array.from(text)) {
+        const svg = resolveBtnIcon(ch, label);
+        if (svg) {
+          changed = true;
+          if (buf) { frag.appendChild(document.createTextNode(buf)); buf = ''; }
+          const span = document.createElement('span');
+          span.className = 'btn-ic';
+          span.innerHTML = svg;
+          frag.appendChild(span);
+        } else buf += ch;
+      }
+      if (changed) {
+        if (buf) frag.appendChild(document.createTextNode(buf));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+  }
+  // Buttons whose label/state text changes at runtime (Height Lock ON/OFF, eye show/hide, etc.) get
+  // their textContent fully reset by the app's own code, which would re-introduce a raw emoji char —
+  // so scanned buttons are NOT permanently skipped; the RE test above is cheap and just no-ops once
+  // a button's remaining text has no more recognized glyphs left in it.
+  let _iconizeQueued = false;
+  function iconizeAllButtons() {
+    _iconizeQueued = false;
+    document.querySelectorAll('button').forEach(iconizeButton);
+  }
+  function queueIconize() {
+    if (_iconizeQueued) return;
+    _iconizeQueued = true;
+    requestAnimationFrame(iconizeAllButtons);
+  }
+  // DISABLED: the flat monochrome line-icon swap above used to run on every button (via the
+  // MutationObserver + queueIconize below), which is why the topbar (undo/redo/compass/folder/
+  // layers/sun) rendered as plain outline glyphs while newer buttons like the Tree/Palm/Bush
+  // vegetation picker kept their full-color emoji. The app is meant to look like the colorful
+  // Tree/Palm/Bush icons everywhere, so the swap is turned off — every button now keeps its
+  // original color emoji glyph, tree included, with nothing converted to a flat line icon.
+  // new MutationObserver(queueIconize).observe(document.body, { childList: true, subtree: true, characterData: true });
+  // queueIconize();
+
   const assetLibraryModal = document.getElementById('assetLibraryModal');
   const assetLibraryGrid = document.getElementById('assetLibraryGrid');
   const assetLibraryFilters = document.getElementById('assetLibraryFilters');
@@ -1142,6 +1510,7 @@
   const assetLibrarySearch = document.getElementById('assetLibrarySearch');
   const assetLibrarySelectBtn = document.getElementById('assetLibrarySelectBtn');
   const assetLibraryOptimizeBtn = document.getElementById('assetLibraryOptimizeBtn');
+  const assetLibraryUnlockBtn = document.getElementById('assetLibraryUnlockBtn');
   const assetLibrarySelectBar = document.getElementById('assetLibrarySelectBar');
   const assetLibrarySelectCount = document.getElementById('assetLibrarySelectCount');
   const assetVariantPrompt = document.getElementById('assetVariantPrompt');
@@ -1364,6 +1733,7 @@
   applyDockHeight(SNAP_PX[dockState], false);
 
   function showLoading(text) {
+    maybeShowLoadingInterstitial();
     loadingText.textContent = text;
     loadingText.style.display = 'block';
     loadingSpinner.style.display = 'block';
@@ -1413,7 +1783,13 @@
   const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 8000);
   camera.position.set(2.2, 1.6, 2.6);
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, stencil: false, powerPreference: 'high-performance' });
+  // NOTE: preserveDrawingBuffer intentionally left OFF — it forces the GPU to keep every frame's
+  // buffer around instead of discarding it, which is a real cost on mobile WebViews (exactly the
+  // kind of thing that shows up as "APK feels laggy" even though the same page felt fine in a
+  // normal mobile browser tab). The one place that reads pixels back — capturePreviewFrame() for
+  // before/after comparisons — already calls renderer.render() immediately before toDataURL(), so
+  // it reads the just-drawn frame before any swap happens and needs no special buffer retention.
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputEncoding = THREE.sRGBEncoding;
@@ -1465,6 +1841,23 @@
     renderer.toneMappingExposure = v;
     exposureVal.textContent = v.toFixed(2);
   };
+
+  // ---------- Keep statsbar/exposure-panel clear of the topbar ----------
+  // Both used to sit at a hardcoded top:54px, which assumed the topbar was always a single text
+  // line tall. The workspace-tabs buttons (🧍 Character / ⛰ Map / Terrain) can wrap onto two or
+  // three lines on narrower phones, making the real topbar taller than 54px — and since #topbar
+  // (z-index 10) draws above #statsbar (z-index 9), the tab pill then visually covers the mesh/
+  // vert/tri counts instead of leaving room for them. Recalculating from the topbar's actual
+  // rendered height keeps these panels positioned just below it no matter how it wraps.
+  function repositionTopOverlays() {
+    const top = Math.round(topbar.getBoundingClientRect().bottom) + 6;
+    statsbar.style.top = top + 'px';
+    exposurePanel.style.top = top + 'px';
+  }
+  window.addEventListener('resize', repositionTopOverlays);
+  window.addEventListener('orientationchange', repositionTopOverlays);
+  if (window.ResizeObserver) new ResizeObserver(repositionTopOverlays).observe(topbar);
+  repositionTopOverlays();
 
   // ---------- Wireframe toggle ----------
   let wireframeOn = false;
@@ -1653,11 +2046,12 @@
     if (vpLeftBarHandle) vpLeftBarHandle.classList.toggle('show', barsRelevant);
   }
 
-  window.addEventListener('resize', () => {
+  function applyRendererSize() {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
-  });
+  }
+  window.addEventListener('resize', applyRendererSize);
 
   if (gizmoBar) gizmoBar.querySelectorAll('button[data-mode]').forEach(btn => {
     btn.onclick = () => setGizmoMode(btn.dataset.mode);
@@ -1840,12 +2234,75 @@
 
   let mixer = null;
   const clock = new THREE.Clock();
+  // Set by playAnimation()/stopAnimation() further down — kept as its own flag (rather than reading
+  // playingIndex directly here) because playingIndex is declared later with `let`, and animate()
+  // runs its first frame synchronously via the animate() call below, before that later declaration
+  // has executed (a `let` in temporal dead zone at that point would throw).
+  let animPreviewPlaying = false;
+
+  // ============================================================
+  // RENDER-ON-DEMAND
+  // Before this, renderer.render() ran unconditionally on every requestAnimationFrame — full GPU
+  // work at the device's max refresh rate even while the person is just looking at a static scene
+  // (which, in an editing tool, is most of the time). That's cheap for a desktop browser tab but is
+  // exactly the kind of constant background GPU/battery draw that shows up as lag/heat on an
+  // Android WebView-wrapped APK, which usually has less compositor headroom than the full Chrome
+  // app. Now a frame is only actually drawn when something could have changed: any touch/pointer/
+  // click/input on the page, OrbitControls moving (including its damping glide after you lift your
+  // finger), or a character animation preview currently playing. idleRenderBudget keeps rendering
+  // for a short window after the last such event so in-flight camera damping / fade-outs finish
+  // smoothly instead of freezing mid-motion.
+  // ============================================================
+  let renderDirty = true;
+  let idleRenderBudget = 0;
+  function requestRender() { renderDirty = true; idleRenderBudget = 12; }
+  ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel', 'click', 'input', 'change', 'keydown', 'touchstart', 'touchmove', 'touchend']
+    .forEach(evt => document.addEventListener(evt, requestRender, { passive: true, capture: true }));
+  window.addEventListener('resize', requestRender);
+  window.addEventListener('orientationchange', requestRender);
+  controls.addEventListener('change', requestRender);
+
+  // ============================================================
+  // AUTO PERFORMANCE STEP-DOWN
+  // Watches how long actual rendered frames take (only frames we drew, thanks to render-on-demand
+  // above) over a rolling sample window. If a device is consistently struggling (this is what
+  // "APK feels laggy" looks like from inside the render loop), quietly lower the render resolution
+  // one notch at a time until it's smooth again, floor at pixel ratio 1 — with a one-line toast
+  // each time so it's not a silent, confusing quality change. Devices that are already fine never
+  // see this at all.
+  // ============================================================
+  let perfFrameTimes = [];
+  let perfMonitorDone = false; // stops once floor is hit — no point keeping the check running forever
+  function checkAutoPerf(frameMs) {
+    if (perfMonitorDone) return;
+    perfFrameTimes.push(frameMs);
+    if (perfFrameTimes.length < 40) return; // ~40 actually-drawn frames before judging, so one busy moment doesn't trigger it
+    const avg = perfFrameTimes.reduce((a, b) => a + b, 0) / perfFrameTimes.length;
+    perfFrameTimes = [];
+    if (avg <= 33) return; // averaging better than ~30fps per drawn frame — leave quality alone
+    const cur = renderer.getPixelRatio();
+    const next = Math.max(1, Math.round((cur - 0.5) * 10) / 10);
+    if (next >= cur) { perfMonitorDone = true; return; } // already at the floor, stop checking
+    renderer.setPixelRatio(next);
+    applyRendererSize();
+    requestRender();
+    toast('This device is finding the graphics heavy, so resolution was lowered a notch for smoother performance.', 3600);
+    if (next <= 1) perfMonitorDone = true;
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
+    if (animPreviewPlaying) requestRender(); // keep drawing every frame while a preview animation runs
     if (mixer) mixer.update(dt);
     controls.update();
-    renderer.render(scene, camera);
+    if (renderDirty || idleRenderBudget > 0) {
+      const t0 = performance.now();
+      renderer.render(scene, camera);
+      checkAutoPerf(performance.now() - t0);
+      renderDirty = false;
+      if (idleRenderBudget > 0) idleRenderBudget--;
+    }
   }
   animate();
 
@@ -1866,7 +2323,117 @@
     if (activeRoot) fitCameraToObject(activeRoot);
   };
 
-  const TEX_SIZE = 2048; // bumped from 1024 — keeps more detail from imported base-color textures
+  // ============================================================
+  // PREMIUM UNLOCKS — both earned by watching a rewarded ad, no paid purchase involved.
+  // showRewardedAdToUnlock() is the ONE place that talks to the ad SDK — swap in the real Capacitor
+  // AdMob rewarded-ad call there (see the TODO) once the rewarded ad unit is set up; everything else
+  // here just reacts to the reward.
+  //
+  // LIBRARY: each ad watched grants +5 extra permanent slots (stacks — watch 3 times, get +15).
+  // Persisted in localStorage, so credits are never lost, only spent by saving more models.
+  //
+  // 4K TEXTURES: NOT a one-time unlock — it's spent per use. Watching the ad sets a SESSION-ONLY
+  // flag (plain JS variable, not localStorage), good until the app/page is closed or reloaded. Next
+  // time 4K is wanted in a fresh session, another ad is needed. This matches "ek baar dekho, is
+  // session ke liye 4K mil jaaye, agli baar phir dekhna" rather than a forever unlock.
+  // ============================================================
+  const LIBRARY_CREDIT_KEY = 'forge_library_bonus_slots';
+  const LIBRARY_CREDIT_PER_AD = 5;
+  function getLibraryBonusSlots() {
+    try { return parseInt(localStorage.getItem(LIBRARY_CREDIT_KEY), 10) || 0; } catch (e) { return 0; }
+  }
+  function addLibraryBonusSlots(n) {
+    try { localStorage.setItem(LIBRARY_CREDIT_KEY, String(getLibraryBonusSlots() + n)); } catch (e) { /* private mode etc — credit just won't persist across restarts */ }
+  }
+  // Placeholder rewarded-ad call. TODO: replace the body with the real Capacitor AdMob rewarded-ad
+  // flow (e.g. capacitor-community/admob's prepareRewardVideoAd()/showRewardVideoAd(), listening for
+  // its reward-earned event) once that ad unit exists — mirrors the banner ad setup already at the
+  // bottom of this file, just with a rewarded ad unit ID instead of a banner one. onReward() must
+  // only fire once the person has actually watched the ad through, not just tapped to start it.
+  // Two separate rewarded ad units recommended (one for library, one for 4K) so AdMob reports each
+  // placement's performance separately — pass whichever ID applies via adUnitId.
+  function showRewardedAdToUnlock(featureLabel, adUnitId, onReward) {
+    const plugin = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob;
+    if (!plugin) {
+      toast('Ads aren\'t available outside the packaged app — this unlock only works in the installed APK.', 3200);
+      return;
+    }
+    toast('Loading ad…', 1500);
+    Promise.resolve()
+      .then(() => plugin.prepareRewardVideoAd ? plugin.prepareRewardVideoAd({ adId: adUnitId }) : null)
+      .then(() => plugin.showRewardVideoAd({ adId: adUnitId }))
+      .then(() => { onReward(); toast(featureLabel, 2600); })
+      .catch((err) => {
+        console.warn('Rewarded ad failed:', err);
+        toast('Ad didn\'t finish, so nothing was unlocked. Try again anytime.', 3200);
+      });
+  }
+  const LIBRARY_REWARDED_AD_ID = 'ca-app-pub-6842986503191598/2385683238'; // Rewarded ad unit (shared with 4K unlock below)
+  const TEX4K_REWARDED_AD_ID = 'ca-app-pub-6842986503191598/9566274457'; // 4K unlock rewarded ad unit (separate from library, own stats)
+
+  // ============================================================
+  // LOADING-SCREEN INTERSTITIAL — a short (a few seconds, skippable) full-screen ad shown while a
+  // loading spinner is up (model import, library add, project load, etc.), on top of the existing
+  // always-on bottom banner. showLoading() is called ~20 places across the app, several of them in
+  // quick succession during normal editing (adding a few library models back to back, for example),
+  // so this is deliberately COOLDOWN-GATED rather than firing every single time: showing a
+  // full-screen ad on every brief spinner would be genuinely annoying AND is the kind of excessive-
+  // interstitial-frequency pattern AdMob's own policies warn against (risking the account, not just
+  // annoying people). INTERSTITIAL_MIN_GAP_MS below controls how often it's actually allowed to show;
+  // raise it if it still feels like too much once you can test it for real.
+  // ============================================================
+  const INTERSTITIAL_AD_ID = 'ca-app-pub-6842986503191598/7446438228'; // Loading-screen interstitial ad unit
+  const INTERSTITIAL_MIN_GAP_MS = 90 * 1000; // don't show more than once per ~90s of active use
+  let lastInterstitialAt = 0;
+  function maybeShowLoadingInterstitial() {
+    const plugin = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob;
+    if (!plugin || typeof plugin.prepareInterstitial !== 'function') return; // outside the packaged app, or ad unit not wired up yet — no-op
+    const now = Date.now();
+    if (now - lastInterstitialAt < INTERSTITIAL_MIN_GAP_MS) return; // too soon since the last one — just show the normal spinner, no ad this time
+    lastInterstitialAt = now;
+    plugin.prepareInterstitial({ adId: INTERSTITIAL_AD_ID })
+      .then(() => plugin.showInterstitial())
+      .catch((err) => console.warn('Loading interstitial failed (spinner still shows normally):', err));
+  }
+
+  const FREE_LIBRARY_LIMIT = 20; // free-tier cap on how many models can be saved in the Asset Library
+  function libraryHasRoomFor(n) { return (libraryAssets.length + n) <= (FREE_LIBRARY_LIMIT + getLibraryBonusSlots()); }
+  function showLibraryLimitPrompt() {
+    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
+    toast('Library is full (' + cap + ' slots used up) — watch a short ad for +' + LIBRARY_CREDIT_PER_AD + ' more slots.', 3400);
+    showRewardedAdToUnlock('+' + LIBRARY_CREDIT_PER_AD + ' library slots unlocked!', LIBRARY_REWARDED_AD_ID, () => {
+      addLibraryBonusSlots(LIBRARY_CREDIT_PER_AD);
+      renderAssetLibraryGrid();
+    });
+  }
+
+  const FREE_TEX_SIZE = 2048, PREMIUM_TEX_SIZE = 4096;
+  let tex4kUnlockedThisSession = false; // resets on every app/page reload — see note above
+  let TEX_SIZE = FREE_TEX_SIZE; // bumped from 1024 — keeps more detail from imported base-color textures; 4K is a per-session rewarded-ad unlock, see PREMIUM UNLOCKS above
+
+  // Small reusable "texture quality: 2K / 4K unlock" block, dropped into both the map Export tab
+  // and the character export section — same unlock, same explanation, one place to maintain it.
+  // Changing TEX_SIZE only affects canvases created from here on (new paint sessions / freshly
+  // loaded models), not textures already painted at the old size in this session — hence the
+  // "reload the model" note in the unlock toast.
+  function buildTexQualityBlock() {
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;line-height:1.6;color:var(--ink-dim);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;';
+    const label = document.createElement('span');
+    label.innerHTML = '🖼 Texture quality: <b style="color:var(--ink);">' + (TEX_SIZE === PREMIUM_TEX_SIZE ? '4K ✓ (this session)' : '2K') + '</b>';
+    box.appendChild(label);
+    if (TEX_SIZE !== PREMIUM_TEX_SIZE) {
+      const btn = document.createElement('button'); btn.className = 'btn'; btn.style.fontSize = '10.5px'; btn.textContent = '🔓 Unlock 4K for this session (watch ad)';
+      btn.onclick = () => showRewardedAdToUnlock('4K unlocked for this session!', TEX4K_REWARDED_AD_ID, () => {
+        tex4kUnlockedThisSession = true;
+        TEX_SIZE = PREMIUM_TEX_SIZE;
+        toast('4K unlocked for this session — reload/reopen the current model to paint and export at the new resolution. Closing the app will reset this back to 2K.', 4600);
+        refreshUI();
+      });
+      box.appendChild(btn);
+    }
+    return box;
+  }
   const MAX_PAINTABLE_MESHES = 40;      // above this, per-mesh canvas textures would exhaust mobile GPU memory
   const MAX_PAINTABLE_VERTS = 350000;   // combined vertex budget for the same reason
   let activeRoot = null;   // whichever object group is currently in scene
@@ -2303,6 +2870,7 @@
     characterAnimations = [];
     playingIndex = -1;
     currentAction = null;
+    animPreviewPlaying = false;
   }
 
   function loadCharacterObject(obj, label) {
@@ -2774,12 +3342,16 @@
     next.reset().fadeIn(0.2).play();
     currentAction = next;
     playingIndex = index;
+    animPreviewPlaying = true;
+    requestRender();
   }
 
   function stopAnimation() {
     if (currentAction) currentAction.fadeOut(0.2);
     currentAction = null;
     playingIndex = -1;
+    animPreviewPlaying = false;
+    requestRender(); // covers the ~0.2s fade-out tail via idleRenderBudget
   }
 
   function removeAnimation(index) {
@@ -3059,6 +3631,71 @@
   }
 
   // ============================================================
+  // GODOT COLLISION NAMING — Godot's glTF importer auto-generates a CollisionShape3D for any
+  // mesh node whose name ends in a recognized suffix (-col = concave/trimesh static collision,
+  // -convcol = convex collision), with no suffix meaning "no collision, just a visual mesh". So
+  // instead of exporting plain names and making the person add colliders by hand in Godot for
+  // every single object, we rename mesh nodes right before export (and rename them back right
+  // after) so the GLB/GLTF already carries collision — walkable ground, solid rocks/trees/props,
+  // but grass/water stay walk-through with no suffix, matching how they'd actually behave.
+  // ============================================================
+  const COLLISION_SUFFIX = { trimesh: '-col', convex: '-convcol', none: '' };
+  // Per-category defaults: ground/buildings/roads are walked ON (need accurate, possibly-concave
+  // trimesh collision); rocks/trees/blocks/vehicles/props are solid objects you walk INTO (cheaper
+  // convex collision is fine and is what Godot recommends for anything that isn't the ground);
+  // grass and water stay walk-through with no collision at all.
+  const CATEGORY_COLLISION_DEFAULT = {
+    ground: 'trimesh', building: 'trimesh', road: 'trimesh',
+    rock: 'convex', tree: 'convex', block: 'convex', vehicle: 'convex', prop: 'convex',
+    grass: 'none', water: 'none', other: 'none'
+  };
+  function effectiveCollisionMode(entry) {
+    if (entry.collisionMode && entry.collisionMode !== 'auto') return entry.collisionMode;
+    return CATEGORY_COLLISION_DEFAULT[entry.category] || 'none';
+  }
+  // Strips any collision suffix this function may have previously appended, so repeated
+  // exports (or a category/override change between exports) never stack suffixes like
+  // "Rock-col-col" or leave a stale "-convcol" behind after switching to "-col".
+  function stripCollisionSuffix(name) {
+    return (name || '').replace(/-(col|convcol)$/, '');
+  }
+  function collisionLabel(mode) {
+    return mode === 'trimesh' ? 'Collision: solid ground (-col)'
+         : mode === 'convex' ? 'Collision: solid object (-convcol)'
+         : 'Collision: none (walk-through)';
+  }
+  // Renames every exportable mesh node (map objects + the terrain mesh itself) in-place with its
+  // Godot collision suffix, right before exporting. Returns a restore() function that puts every
+  // original name back — the export (exporter.parse) can be async, so the caller must call
+  // restore() itself once the export has actually finished (success OR failure), rather than
+  // wrapping just the synchronous parse() call in try/finally.
+  function applyCollisionNaming(root) {
+    if (root !== terrainRoot) return { applied: 0, restore: function () {} }; // only the map export carries map objects/terrain
+    const renamed = [];
+    function applyTo(mesh, category, overrideEntry) {
+      if (!mesh || !mesh.isObject3D) return;
+      const mode = overrideEntry ? effectiveCollisionMode(overrideEntry) : (CATEGORY_COLLISION_DEFAULT[category] || 'none');
+      const suffix = COLLISION_SUFFIX[mode] || '';
+      const base = stripCollisionSuffix(mesh.name);
+      if (base + suffix === mesh.name) return;
+      renamed.push({ mesh, original: mesh.name });
+      mesh.name = base + suffix;
+    }
+    mapObjects.forEach(entry => applyTo(entry.mesh, entry.category, entry));
+    if (terrainMesh) applyTo(terrainMesh, 'ground', null);
+    let restored = false;
+    return {
+      applied: renamed.filter(r => r.mesh.name.endsWith('-col')).length, // trimesh count, for the export toast
+      convexApplied: renamed.filter(r => r.mesh.name.endsWith('-convcol')).length,
+      restore: function () {
+        if (restored) return; // finishExport/failExport can't both fire, but guard anyway
+        restored = true;
+        renamed.forEach(r => { r.mesh.name = r.original; });
+      }
+    };
+  }
+
+  // ============================================================
   // ASSET LIBRARY — a persistent, personal store of your models (trees, rocks, buildings, props…).
   // Upload a model here once and it stays saved on this device (IndexedDB) across every future
   // project/session — no more re-uploading the same tree every time. The 📚 button (and the
@@ -3177,7 +3814,7 @@
   // Small metadata sidecar for the current map scene — category/hidden/locked per object name —
   // reapplied by name after the GLB is re-parsed on load (mirrors projectMetadata() below).
   function currentMapSidecar() {
-    return mapObjects.map(o => ({ name: o.name, category: o.category, hidden: o.hidden, locked: o.locked }));
+    return mapObjects.map(o => ({ name: o.name, category: o.category, hidden: o.hidden, locked: o.locked, collisionMode: o.collisionMode }));
   }
   function applyMapSidecar(list) {
     (list || []).forEach(saved => {
@@ -3187,6 +3824,7 @@
       entry.category = saved.category;
       entry.hidden = saved.hidden; entry.mesh.visible = !saved.hidden;
       entry.locked = saved.locked;
+      entry.collisionMode = saved.collisionMode || 'auto'; // older saved projects won't have this — default to auto
     });
     mapObjects.forEach(o => { delete o._projectApplied; });
   }
@@ -3222,7 +3860,10 @@
     }));
     Promise.all(steps).then(() => {
       // A quick low-res thumbnail from whichever canvas is currently visible, for the project grid.
-      try { rec.thumb = renderer.domElement.toDataURL('image/jpeg', 0.5); } catch (e) {}
+      // Explicit render() right before toDataURL(): needed now that the renderer no longer keeps
+      // preserveDrawingBuffer on (removed for performance — see renderer setup), so the canvas isn't
+      // guaranteed to still hold the last drawn frame by the time this async step runs.
+      try { renderer.render(scene, camera); rec.thumb = renderer.domElement.toDataURL('image/jpeg', 0.5); } catch (e) {}
       try { rec.stats = computeProjectStats(); } catch (e) {}
       return dbPutProject(rec);
     }).then(() => {
@@ -3574,6 +4215,7 @@
     const list = all.filter(f => /\.(glb|gltf|fbx)$/i.test(f.name));
     const textureFiles = all.filter(f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|tga|dds)$/i.test(f.name));
     if (!list.length) { toast('Pick .glb, .gltf or .fbx model files.', 2200); return; }
+    if (!libraryHasRoomFor(list.length)) { showLibraryLimitPrompt(); return; }
     showLoading('Adding to library…');
 
     // Convert every texture in this batch to a data URL up front — not just for resolving external
@@ -3788,6 +4430,7 @@
     libraryUseOptimized = !libraryUseOptimized;
     assetLibraryOptimizeBtn.classList.toggle('active', libraryUseOptimized);
   };
+  assetLibraryUnlockBtn.onclick = () => showLibraryLimitPrompt();
 
   // Small popup shown after tapping a card in the picker (only when picking for placement) —
   // lets the user choose the full-detail original or a decimated "optimized" copy before it's
@@ -3895,6 +4538,7 @@
   // in the Asset Library — same record shape as a freshly-uploaded model — so next time it's picked
   // directly from the grid instead of having to re-open the pack and pick it again every time.
   function saveAssetPartToLibrary(name, node, category, onDone) {
+    if (!libraryHasRoomFor(1)) { showLibraryLimitPrompt(); if (onDone) onDone(false, null); return; }
     const clone = node.clone(true);
     // Only re-center position here — do NOT force rotation to 0. Most pack items already sit at
     // identity local rotation so this went unnoticed, but some items (e.g. a bird-tree part) are
@@ -4183,7 +4827,10 @@
   function renderAssetLibraryGrid() {
     renderAssetLibraryFilters();
     assetLibraryGrid.innerHTML = '';
-    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device');
+    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
+    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device') +
+      ' — ' + Math.max(0, cap - libraryAssets.length) + '/' + cap + ' slots left';
+    if (assetLibraryUnlockBtn) assetLibraryUnlockBtn.textContent = '🔓 +' + LIBRARY_CREDIT_PER_AD + ' slots (watch ad)';
     if (!libraryReady) {
       const p = document.createElement('p'); p.style.cssText = 'grid-column:1/-1;font-size:12px;color:var(--ink-dim);text-align:center;padding:30px 10px;';
       p.textContent = 'Loading your library…';
@@ -4247,6 +4894,7 @@
       id, mesh,
       name: mesh.name || ('Object ' + id),
       category: categoryHint || classifyByName(mesh.name),
+      collisionMode: 'auto', // 'auto' | 'trimesh' | 'convex' | 'none' — see effectiveCollisionMode()
       locked: false, hidden: false, groundLocked: false,
       baseTransform: {
         position: mesh.position.clone(), rotation: mesh.rotation.clone(), scale: mesh.scale.clone()
@@ -7380,7 +8028,7 @@
       version: 1, savedAt: Date.now(), workspace,
       terrain: { isCustom: terrainIsCustom, size: TERRAIN_SIZE, segs: TERRAIN_SEG },
       objects: mapObjects.map(o => ({
-        name: o.name, category: o.category, hidden: o.hidden, locked: o.locked,
+        name: o.name, category: o.category, hidden: o.hidden, locked: o.locked, collisionMode: o.collisionMode,
         position: o.mesh.position.toArray(), rotation: [o.mesh.rotation.x, o.mesh.rotation.y, o.mesh.rotation.z], scale: o.mesh.scale.toArray()
       }))
     };
@@ -7410,6 +8058,7 @@
           entry.mesh.scale.fromArray(saved.scale);
           entry.hidden = saved.hidden; entry.mesh.visible = !saved.hidden;
           entry.locked = saved.locked;
+          entry.collisionMode = saved.collisionMode || 'auto';
           applied++;
         });
         mapObjects.forEach(o => { delete o._projectApplied; });
@@ -7463,6 +8112,7 @@
       entry.mesh.scale.fromArray(saved.scale);
       entry.hidden = saved.hidden; entry.mesh.visible = !saved.hidden;
       entry.locked = saved.locked;
+      entry.collisionMode = saved.collisionMode || 'auto';
       applied++;
     });
     mapObjects.forEach(o => { delete o._projectApplied; });
@@ -8041,9 +8691,16 @@
     const opts = { binary: !asPlainGltf, embedImages: true, truncateDrawRange: true };
     if (animClips && animClips.length) opts.animations = animClips;
 
+    // Temporarily suffix mesh names (-col / -convcol) so Godot's glTF importer auto-generates
+    // collision shapes on import — see applyCollisionNaming for the full explanation. restore()
+    // is called from BOTH finishExport and failExport below so the live scene's names always end
+    // up back to normal, whether the export succeeded or not.
+    const collisionNaming = applyCollisionNaming(root);
+
     let handled = false;
     function finishExport(result) {
       handled = true;
+      collisionNaming.restore();
       // Sanity-check the actual export output before handing it to the browser as a download —
       // if this is empty/near-empty despite passing the visibility check above, something else
       // went wrong (e.g. the exporter itself threw internally and returned a bare skeleton) and
@@ -8082,10 +8739,13 @@
       setTimeout(() => URL.revokeObjectURL(url), 4000);
       const fixNote = (preExportFix.missingTex || preExportFix.brightened) ? (' (cleaned up ' + (preExportFix.missingTex + preExportFix.brightened) + ' broken material reference(s) first)') : '';
       const animNote = (animClips && animClips.length) ? (' with ' + animClips.length + ' animation(s) embedded — they will show up as separate clips on the AnimationPlayer in Godot.') : '.';
-      toast((asPlainGltf ? 'GLTF' : 'GLB') + ' exported' + fixNote + animNote, 4600);
+      const colTotal = (collisionNaming.applied || 0) + (collisionNaming.convexApplied || 0);
+      const colNote = colTotal ? (' Godot will auto-generate collision on import (' + colTotal + ' object(s) named with -col/-convcol).') : '';
+      toast((asPlainGltf ? 'GLTF' : 'GLB') + ' exported' + fixNote + animNote + colNote, 5200);
     }
     function failExport(err) {
       handled = true;
+      collisionNaming.restore();
       console.error(err);
       const asGlb = !asPlainGltf;
       toast(
@@ -8410,6 +9070,7 @@
       const div3 = document.createElement('div'); div3.className = 'divider'; dock.appendChild(div3);
       const secLabel3 = document.createElement('div'); secLabel3.className = 'sec-label'; secLabel3.textContent = 'Export combined character';
       dock.appendChild(secLabel3);
+      dock.appendChild(buildTexQualityBlock());
 
       const actionsC = document.createElement('div'); actionsC.className = 'row actions';
       const bGlbAll = document.createElement('button'); bGlbAll.className = 'btn green';
@@ -9258,6 +9919,11 @@
     });
     dock.appendChild(chipRow);
 
+    const colNote = document.createElement('p');
+    colNote.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 8px;line-height:1.5;';
+    colNote.textContent = '🧩🧱🔷➖ on each row sets Godot collision for export: auto (by category), forced solid-ground, forced solid-object, or none. Tap to cycle.';
+    dock.appendChild(colNote);
+
     const listWrap = document.createElement('div'); listWrap.className = 'objlist'; listWrap.id = 'objlist-wrap';
     dock.appendChild(listWrap);
     function renderObjList() {
@@ -9274,7 +9940,23 @@
         eyeBtn.onclick = () => { entry.hidden = !entry.hidden; entry.mesh.visible = !entry.hidden; renderObjList(); };
         const lockBtn = document.createElement('button'); lockBtn.className = 'iconmini' + (entry.locked ? ' on' : ''); lockBtn.textContent = entry.locked ? '🔒' : '🔓';
         lockBtn.onclick = () => { entry.locked = !entry.locked; if (entry.locked) { const i = selectedIds.indexOf(entry.id); if (i >= 0) { selectedIds.splice(i, 1); setHighlight(entry, false); } } renderObjList(); };
-        row.appendChild(catTag); row.appendChild(name); row.appendChild(eyeBtn); row.appendChild(lockBtn);
+        // Godot collision tap-to-cycle: auto (follows category default) → force solid-ground → force
+        // solid-object → force none → back to auto. Icon shows the mode; title/toast spells it out
+        // since a bare icon alone won't be obvious on a small screen.
+        const colModes = ['auto', 'trimesh', 'convex', 'none'];
+        const colIcon = { auto: '🧩', trimesh: '🧱', convex: '🔷', none: '➖' };
+        const colBtn = document.createElement('button');
+        colBtn.className = 'iconmini' + (effectiveCollisionMode(entry) !== 'none' ? ' on' : '');
+        colBtn.textContent = colIcon[entry.collisionMode || 'auto'];
+        colBtn.title = collisionLabel(effectiveCollisionMode(entry)) + (entry.collisionMode === 'auto' || !entry.collisionMode ? ' — auto by category' : ' — manual override');
+        colBtn.onclick = () => {
+          const i = colModes.indexOf(entry.collisionMode || 'auto');
+          entry.collisionMode = colModes[(i + 1) % colModes.length];
+          const label = entry.collisionMode === 'auto' ? ('Auto (' + collisionLabel(CATEGORY_COLLISION_DEFAULT[entry.category] || 'none').replace('Collision: ', '') + ')') : collisionLabel(entry.collisionMode).replace('Collision: ', '');
+          toast('"' + entry.name + '" collision → ' + label, 1800);
+          renderObjList();
+        };
+        row.appendChild(catTag); row.appendChild(name); row.appendChild(eyeBtn); row.appendChild(lockBtn); row.appendChild(colBtn);
         listWrap.appendChild(row);
       });
       if (mapObjects.length > 300) { const p = document.createElement('div'); p.style.cssText = 'padding:8px 10px;font-size:11px;color:var(--ink-dim);'; p.textContent = 'Showing first 300 — narrow with search/category to find more.'; listWrap.appendChild(p); }
@@ -10085,6 +10767,18 @@
     dock.appendChild(readyBox);
     report.warnings.forEach(w => { const warn = document.createElement('div'); warn.className = 'warnbox'; warn.textContent = w; dock.appendChild(warn); });
 
+    // Collision summary — counts how the CURRENT objects will be tagged on the next GLB/GLTF
+    // export, so the person can see (and go fix in the Object tab) before actually exporting,
+    // rather than only finding out after opening the file in Godot.
+    const colCounts = { trimesh: 0, convex: 0, none: 0 };
+    mapObjects.forEach(o => { colCounts[effectiveCollisionMode(o)]++; });
+    if (terrainMesh) colCounts.trimesh++; // the ground itself, always solid-ground by default
+    const colBox = document.createElement('div');
+    colBox.style.cssText = 'background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;line-height:1.6;color:var(--ink-dim);';
+    colBox.innerHTML = '🧱 Godot collision on export: <b style="color:var(--ink);">' + colCounts.trimesh + '</b> solid-ground, <b style="color:var(--ink);">' + colCounts.convex + '</b> solid-object, <b style="color:var(--ink);">' + colCounts.none + '</b> walk-through. Change any object\'s mode in the Object tab.';
+    dock.appendChild(colBox);
+    dock.appendChild(buildTexQualityBlock());
+
     const secLabel = document.createElement('div'); secLabel.className = 'sec-label'; secLabel.style.marginTop = '8px'; secLabel.textContent = 'Export map (for Godot)';
     dock.appendChild(secLabel);
     const actions = document.createElement('div'); actions.className = 'row actions';
@@ -10251,6 +10945,11 @@
 
 
   function refreshUI() {
+    // Central "something in the scene/tool state changed" hook — also used as the render-on-demand
+    // trigger for changes that finish asynchronously (file imports, terrain rebuilds, etc.), since
+    // those don't happen inside the same input event that started them and would otherwise miss
+    // the pointer/click-based requestRender() triggers.
+    requestRender();
     // FIX: was `paintMeshes.length > 0` — for a "too dense to paint" character (charTooDense),
     // paintMeshes stays empty on purpose (see loadCharacterObject), so this used to hide the whole
     // bottom dock — including the "Combine Animations" tab and its Add-animation button — the moment
