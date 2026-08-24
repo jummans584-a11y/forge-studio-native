@@ -232,10 +232,28 @@
     height: 38vh; /* JS overrides this per drag/snap state once initialized */
     max-height: 92vh;
     touch-action: none;
+    overflow: hidden; /* BUGFIX: hard clip — nothing (mode-bar, dock content) can ever visually
+      spill past the panel's own bounds and over the 3D viewport, no matter what width/overflow
+      miscalculation happens inside. Inner scroll areas (#dock, .seg) keep their own overflow
+      auto/scroll so this doesn't block normal scrolling. */
   }
   #dock-sheet.show { display: flex; }
   #dock-sheet.dragging { transition: none !important; }
   #dock-sheet.snap { transition: height 0.28s cubic-bezier(0.22, 1, 0.36, 1), width 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+
+  /* BUGFIX (rotate-to-landscape overflow): #dock-mode-bar and #dock used to be direct siblings of
+     #dock-handle-area inside #dock-sheet. That's fine in portrait (flex-direction:column — they
+     naturally stack top to bottom). But in landscape #dock-sheet switches to flex-direction:row
+     (see #dock-sheet.landscape below), and with no shared wrapper, #dock-mode-bar ended up as its
+     OWN full-width row item sitting BESIDE #dock instead of stacked above it — it doesn't shrink
+     (flex-shrink:0) and has no landscape width cap, so the Orbit/Mountain/Pit/... button row
+     rendered at its full natural width, pushing #dock aside and overflowing the whole narrow
+     landscape panel out across the 3D viewport and the top toolbar.
+     Fix: #dock-mode-bar and #dock now share this wrapper. In portrait it's `display:contents` —
+     invisible to layout, so portrait behaves exactly as before. In landscape (see override below)
+     it becomes its own flex column, so mode-bar sits above dock, both correctly constrained to the
+     panel's actual width, while #dock-handle-area stays the separate row item beside them. */
+  #dock-content-col { display: contents; }
 
   /* Landscape (phone rotated sideways): the sheet moves from a bottom drawer to a LEFT-side drawer
      instead, so the tool list (tree/rock/tractor/etc.) no longer eats into the short vertical
@@ -334,9 +352,18 @@
     touch-action: none;
   }
   #dock-sheet.landscape #dock {
-    order: 1;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 8px calc(10px + env(safe-area-inset-bottom, 0px)) calc(10px + env(safe-area-inset-left, 0px));
   }
+  /* Landscape: mode-bar + dock become a real flex column (see #dock-content-col comment above),
+     stacked above one another and both capped to the panel's actual width — this whole column
+     is the row item that sits opposite #dock-handle-area, so nothing inside it can push wider
+     than the panel itself. Natural DOM order (mode-bar then dock) already stacks them correctly,
+     so neither needs its own order override inside the column. */
+  #dock-sheet.landscape #dock-content-col {
+    display: flex; flex-direction: column;
+    order: 1; flex: 1; min-width: 0; min-height: 0; height: 100%;
+  }
+  #dock-sheet.landscape #dock-mode-bar { flex-shrink: 0; }
   /* Landscape: the drawer is narrow-but-tall (not wide-but-short like portrait), so the 5-across
      primary toolbar row would otherwise squeeze into a sliver and the labels/icons start
      overlapping ("chipak" together). Stack it into a column instead — plenty of vertical room in
@@ -1253,8 +1280,10 @@
     <div id="dock-handle-area">
       <div id="dock-handle-bar"></div>
     </div>
-    <div id="dock-mode-bar"></div>
-    <div id="dock"></div>
+    <div id="dock-content-col">
+      <div id="dock-mode-bar"></div>
+      <div id="dock"></div>
+    </div>
   </div>
 
   <div id="block-preview-hint">Rotate / pinch-zoom to inspect this shape</div>
