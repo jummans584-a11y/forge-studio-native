@@ -8157,6 +8157,14 @@
     const rect = renderer.domElement.getBoundingClientRect();
     const cx = (e.touches ? e.touches[0].clientX : e.clientX);
     const cy = (e.touches ? e.touches[0].clientY : e.clientY);
+    setPointerFromClient(cx, cy);
+    return { cx, cy };
+  }
+
+  // Shared by getPointerNDC (real events) and the fast-drag interpolation below (synthetic
+  // in-between points) so both go through the exact same client-px → NDC math.
+  function setPointerFromClient(cx, cy) {
+    const rect = renderer.domElement.getBoundingClientRect();
     pointer.x = ((cx - rect.left) / rect.width) * 2 - 1;
     pointer.y = -((cy - rect.top) / rect.height) * 2 + 1;
   }
@@ -8525,10 +8533,21 @@
     updateSculptBrush(_brushHoverPoint, _brushHoverNormal, brushHoverRadius());
   }
 
+  // Fast-drag gap fix: pointermove only fires as often as the OS/browser samples touch input, so a
+  // quick swipe reports a handful of far-apart points instead of a dense trail. Stamping only at
+  // each reported point left visible gaps ("dot dot dot") between dabs whenever the finger moved
+  // faster than the brush spacing could keep up with — slow drags looked fine because consecutive
+  // points happened to land close together on their own. _lastStrokeClientPt remembers the last
+  // point (in the same client-px space as pointer events) so onMove can walk the straight line from
+  // there to the new point and stamp every step along the way, not just the endpoint.
+  let _lastStrokeClientPt = null;
+  const STROKE_STEP_PX = 12;     // max gap between synthetic stamps, in screen pixels
+  const STROKE_MAX_STEPS = 20;   // hard cap so one huge jump (e.g. a stray coalesced event, or a lifted-and-replanted finger) can't spam raycasts/full-mesh sculpt passes and stall the frame
+
   function onDown(e) {
     _lastPointerEvent = e;
     const m = (workspace === 'character') ? charMode : terrainMode;
-    if (orbitOverride || ORBIT_MODES.includes(m)) return;
+    if (orbitOverride || ORBIT_MODES.includes(m)) { _lastStrokeClientPt = null; return; }
     // The gizmo's own TransformControls listener is registered on this same element earlier (see
     // `new THREE.TransformControls(...)` above) so it always runs first and sets gizmo.axis the
     // instant a handle is grabbed. Without this guard, our own select/deselect logic below would
@@ -8542,7 +8561,8 @@
     strokeSavedTerrain = false;
     vegStrokePositions = [];
     _paintStrokeBefore = new Map();
-    getPointerNDC(e);
+    const _downPt = getPointerNDC(e);
+    _lastStrokeClientPt = { x: _downPt.cx, y: _downPt.cy };
     // Pick part mode wins over every other tool while it's on — a tap anywhere on the map is
     // treated as "which model did you mean to pick a part from?" instead of painting, selecting,
     // or placing, so it never fights those tools for the same tap (see the header 🎯 Pick part
@@ -8590,16 +8610,33 @@
   function onMove(e) {
     _lastPointerEvent = e;
     const m = (workspace === 'character') ? charMode : terrainMode;
-    getPointerNDC(e);
+    const pt = getPointerNDC(e);
     updateBrushHoverIndicator();
     if (orbitOverride || ORBIT_MODES.includes(m) || !isPointerDown) return;
-    if (m === 'select' || m === 'road' || m === 'water' || m === 'mountain') return; // single-tap tools
-    workspace === 'character' ? paintCharacterAtPointer() : handleTerrainAtPointer();
+    if (m === 'select' || m === 'road' || m === 'water' || m === 'mountain') { _lastStrokeClientPt = { x: pt.cx, y: pt.cy }; return; } // single-tap tools
+    const stamp = workspace === 'character' ? paintCharacterAtPointer : handleTerrainAtPointer;
+    // Walk from the last stamped point to this one in screen space, stamping every STROKE_STEP_PX
+    // along the way, instead of only at the new point — this is what turns a fast swipe's gappy
+    // dabs back into a continuous line, matching what a slow drag already looked like.
+    if (_lastStrokeClientPt) {
+      const dx = pt.cx - _lastStrokeClientPt.x, dy = pt.cy - _lastStrokeClientPt.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const steps = Math.min(STROKE_MAX_STEPS, Math.ceil(dist / STROKE_STEP_PX));
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        setPointerFromClient(_lastStrokeClientPt.x + dx * t, _lastStrokeClientPt.y + dy * t);
+        stamp();
+      }
+      setPointerFromClient(pt.cx, pt.cy); // restore the real (final) point before the last stamp
+    }
+    stamp();
+    _lastStrokeClientPt = { x: pt.cx, y: pt.cy };
   }
   function onUp() {
     // This listener is on window (so a drag that ends outside the canvas still gets released), but
     // that also means it fires for pointerups on unrelated UI like the bottom-sheet handle — skip
     // work entirely unless a map-editing gesture was actually in progress.
+    _lastStrokeClientPt = null;
     if (!isPointerDown) return;
     if (terrainMode === 'deletebrush' && pendingDeleteIds.length) finishDeleteBrush();
     if (terrainMode === 'deletebrush' && grassDeleteBatch.length) finishGrassDeleteStroke();
