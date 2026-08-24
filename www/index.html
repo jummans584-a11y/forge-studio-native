@@ -5667,8 +5667,18 @@
     _sculptInvMat.copy(terrainMesh.matrixWorld).invert();
     _sculptLocalPoint.copy(point).applyMatrix4(_sculptInvMat);
     const pos = terrainMesh.geometry.attributes.position;
-    const r = terrainBrushRadius / worldScale;
+    // FIX: the brush's local radius is terrainBrushRadius/worldScale, so scaling the Ground UP
+    // (Transform/Scale panel) shrinks it in local grid space — past a certain scale it covers only
+    // 1-2 vertices. A single raised vertex surrounded by untouched neighbors is always going to read
+    // as a sharp spike, no amount of smoothing can round out a bump with no surrounding samples to
+    // round it WITH — this is why bigger Ground made the spikes worse, not better. Flooring the local
+    // radius at a few grid cells' worth of spacing guarantees the brush always has enough neighboring
+    // vertices to actually blend across, no matter how far the Ground has been scaled up.
+    const gridSpacing = TERRAIN_SIZE / TERRAIN_SEG;
+    const r = Math.max(terrainBrushRadius / worldScale, gridSpacing * 2.5);
     const localStrength = terrainStrength / worldScale;
+    const gridW = TERRAIN_SEG + 1; // vertex columns per row — PlaneGeometry is laid out row-major
+    const touched = [];
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
       const dx = x - _sculptLocalPoint.x, dz = z - _sculptLocalPoint.z;
@@ -5676,6 +5686,40 @@
       if (d > r) continue;
       const falloff = Math.pow(Math.cos((d / r) * Math.PI * 0.5), terrainSharpness);
       pos.setY(i, sculptNewY(mode, y, dx, dz, d, r, falloff, localStrength));
+      touched.push(i);
+    }
+    // FIX: every vertex above was only ever reacting to its own distance from the brush center —
+    // nothing blended it toward its neighbors, so on a dense grid each stroke left a field of tiny
+    // independent bumps/ridges instead of one smooth swell (this is the "sharp/spiky" look reported
+    // when dragging the brush). A few neighbor-averaging relaxation passes over just the touched
+    // vertices fixes that: each one settles part-way toward the average height of its 8 surrounding
+    // grid neighbors (orthogonal + diagonal — orthogonal-only made the bump propagate in a
+    // plus/diamond shape, which itself looked pointed along the diagonals), so the result reads as a
+    // smooth round hill even at low effective vertex density. Runs on every stroke automatically —
+    // nothing for the person to adjust.
+    if (touched.length > 1) {
+      const SMOOTH_AMOUNT = 0.5;
+      const PASSES = 2;
+      for (let pass = 0; pass < PASSES; pass++) {
+        const snapshot = new Float32Array(pos.count);
+        for (let k = 0; k < touched.length; k++) snapshot[touched[k]] = pos.getY(touched[k]);
+        for (let k = 0; k < touched.length; k++) {
+          const i = touched[k];
+          const row = Math.floor(i / gridW), col = i % gridW;
+          let sum = 0, n = 0;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const rr = row + dr, cc = col + dc;
+              if (rr < 0 || rr >= gridW || cc < 0 || cc >= gridW) continue;
+              sum += pos.getY(rr * gridW + cc); n++;
+            }
+          }
+          if (n === 0) continue;
+          const avg = sum / n;
+          pos.setY(i, applyHeightLock(snapshot[i] + (avg - snapshot[i]) * SMOOTH_AMOUNT));
+        }
+      }
     }
     pos.needsUpdate = true;
     terrainMesh.geometry.computeVertexNormals();
