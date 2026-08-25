@@ -5650,7 +5650,19 @@
     return applyHeightLock(newY);
   }
 
-  function sculptAt(point, mode) {
+  // Distance from vertex (x,z) to the nearest point on segment A→B, returned as the same {dx,dz}
+  // shape a point-brush would give (vertex minus nearest point) so every existing falloff/direction
+  // calc in sculptNewY keeps working unchanged. When A and B are the same point (stroke start, or a
+  // plain tap) this collapses to plain point distance — the original single-dab behavior.
+  function _segNearestOffset(x, z, ax, az, bx, bz) {
+    const ex = bx - ax, ez = bz - az;
+    const lenSq = ex * ex + ez * ez;
+    let t = 0;
+    if (lenSq > 1e-10) { t = ((x - ax) * ex + (z - az) * ez) / lenSq; if (t < 0) t = 0; else if (t > 1) t = 1; }
+    return [x - (ax + ex * t), z - (az + ez * t)];
+  }
+
+  function sculptAt(point, mode, fromPoint) {
     if (terrainHeightmapImg && !terrainIsCustom) { terrainSculptedSinceHeightmap = true; }
     // `point` is the raycaster's hit point, always in WORLD space. This used to be compared
     // directly against the plane's LOCAL vertex x/z, which only lined up while terrainMesh sat at
@@ -5666,12 +5678,16 @@
     const worldScale = terrainMesh.matrixWorld.getMaxScaleOnAxis() || 0.0001;
     _sculptInvMat.copy(terrainMesh.matrixWorld).invert();
     _sculptLocalPoint.copy(point).applyMatrix4(_sculptInvMat);
+    // fromPoint (the previous stamp of this same drag) lets the brush sweep the whole segment from
+    // there to `point` in this one pass — see _segNearestOffset above. Falls back to `point` itself
+    // (plain point-distance) at the start of a stroke, when there's nothing to sweep from yet.
+    _sculptLocalPointA.copy(fromPoint || point).applyMatrix4(_sculptInvMat);
     const pos = terrainMesh.geometry.attributes.position;
     const r = terrainBrushRadius / worldScale;
     const localStrength = terrainStrength / worldScale;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const dx = x - _sculptLocalPoint.x, dz = z - _sculptLocalPoint.z;
+      const [dx, dz] = _segNearestOffset(x, z, _sculptLocalPointA.x, _sculptLocalPointA.z, _sculptLocalPoint.x, _sculptLocalPoint.z);
       const d = Math.sqrt(dx * dx + dz * dz);
       if (d > r) continue;
       const falloff = Math.pow(Math.cos((d / r) * Math.PI * 0.5), terrainSharpness);
@@ -5688,7 +5704,8 @@
   // only reachable when the map was small enough to be considered paintable/sculptable already).
   const _sculptInvMat = new THREE.Matrix4();
   const _sculptLocalPoint = new THREE.Vector3();
-  function sculptCustomAt(root, worldPoint, mode) {
+  const _sculptLocalPointA = new THREE.Vector3();
+  function sculptCustomAt(root, worldPoint, mode, fromWorldPoint) {
     root.updateMatrixWorld(true);
     const r = terrainBrushRadius;
     root.traverse(o => {
@@ -5708,13 +5725,14 @@
 
       _sculptInvMat.copy(o.matrixWorld).invert();
       _sculptLocalPoint.copy(worldPoint).applyMatrix4(_sculptInvMat);
+      _sculptLocalPointA.copy(fromWorldPoint || worldPoint).applyMatrix4(_sculptInvMat);
       const localR = r / worldScale;
       const localStrength = terrainStrength / worldScale;
       const pos = o.geometry.attributes.position;
       let changed = false;
       for (let i = 0; i < pos.count; i++) {
         const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-        const dx = vx - _sculptLocalPoint.x, dz = vz - _sculptLocalPoint.z;
+        const [dx, dz] = _segNearestOffset(vx, vz, _sculptLocalPointA.x, _sculptLocalPointA.z, _sculptLocalPoint.x, _sculptLocalPoint.z);
         const d = Math.sqrt(dx * dx + dz * dz);
         if (d > localR) continue;
         const falloff = Math.pow(Math.cos((d / localR) * Math.PI * 0.5), terrainSharpness);
@@ -8253,9 +8271,10 @@
 
   const _vpaintInvMat = new THREE.Matrix4();
   const _vpaintLocalPoint = new THREE.Vector3();
+  const _vpaintLocalPointA = new THREE.Vector3();
   const _vpaintColor = new THREE.Color();
   const _vpaintWorldVertex = new THREE.Vector3();
-  function paintVertexColorsAt(root, worldPoint, colorHex, radius) {
+  function paintVertexColorsAt(root, worldPoint, colorHex, radius, fromWorldPoint) {
     _vpaintColor.set(colorHex);
     const useTexture = denseGroundTexOn && denseGroundTex.imgData;
     root.updateMatrixWorld(true);
@@ -8271,13 +8290,14 @@
       ensureVertexColorPaintable(o);
       _vpaintInvMat.copy(o.matrixWorld).invert();
       _vpaintLocalPoint.copy(worldPoint).applyMatrix4(_vpaintInvMat);
+      _vpaintLocalPointA.copy(fromWorldPoint || worldPoint).applyMatrix4(_vpaintInvMat);
       const localR = radius / worldScale;
       const pos = o.geometry.attributes.position;
       const col = o.geometry.attributes.color;
       let changed = false;
       for (let i = 0; i < pos.count; i++) {
         const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
-        const dx = vx - _vpaintLocalPoint.x, dz = vz - _vpaintLocalPoint.z;
+        const [dx, dz] = _segNearestOffset(vx, vz, _vpaintLocalPointA.x, _vpaintLocalPointA.z, _vpaintLocalPoint.x, _vpaintLocalPoint.z);
         const d = Math.sqrt(dx * dx + dz * dz);
         if (d > localR) continue;
         const t = Math.max(0, 1 - d / localR);
@@ -8393,6 +8413,13 @@
     return hits.length ? hits[0] : null;
   }
 
+  // Remembers the world-space point of the last sculpt/vertex-paint stamp for the CURRENT drag, so
+  // the next stamp can sweep the segment from there to the new point in one pass instead of leaving
+  // a gap or needing multiple point-stamps (see _segNearestOffset above). Reset to null on
+  // pointerdown/pointerup so a fresh stroke — or the very first stamp of one — always starts as a
+  // plain point brush, not swept from wherever the previous stroke happened to end.
+  let _lastSculptWorldPt = null;
+
   function handleTerrainAtPointer() {
     if (terrainMode === 'select') return; // handled once on tap-down only, see onDown
     if (terrainMode === 'deletebrush') { deleteBrushSampleAtPointer(_lastPointerEvent); return; }
@@ -8404,7 +8431,8 @@
           const hit = raycastTerrainGround();
           if (!hit) return;
           if (!strokeSavedTerrain) { terrainSaveUndo(); strokeSavedTerrain = true; }
-          paintVertexColorsAt(terrainRoot, hit.point, brushColor, terrainBrushRadius);
+          paintVertexColorsAt(terrainRoot, hit.point, brushColor, terrainBrushRadius, _lastSculptWorldPt);
+          _lastSculptWorldPt = hit.point.clone();
         } else {
           paintCustomTerrainAtPointer();
         }
@@ -8414,7 +8442,8 @@
         const hit = raycastTerrainGround();
         if (!hit) return;
         if (!strokeSavedTerrain) { terrainSaveUndo(); strokeSavedTerrain = true; }
-        sculptCustomAt(terrainRoot, hit.point, terrainMode);
+        sculptCustomAt(terrainRoot, hit.point, terrainMode, _lastSculptWorldPt);
+        _lastSculptWorldPt = hit.point.clone();
       }
       return;
     }
@@ -8425,7 +8454,8 @@
     const hit = hits[0];
     if (SCULPT_MODES.includes(terrainMode)) {
       if (!strokeSavedTerrain) { terrainSaveUndo(); strokeSavedTerrain = true; }
-      sculptAt(hit.point, terrainMode);
+      sculptAt(hit.point, terrainMode, _lastSculptWorldPt);
+      _lastSculptWorldPt = hit.point.clone();
     } else if (terrainMode === 'mountain') {
       if (!strokeSavedTerrain) { terrainSaveUndo(); strokeSavedTerrain = true; }
       // single tap places one mountain — guarded by isPointerDown transition in onDown, not onMove
@@ -8561,6 +8591,7 @@
     strokeSavedTerrain = false;
     vegStrokePositions = [];
     _paintStrokeBefore = new Map();
+    _lastSculptWorldPt = null; // fresh stroke — first stamp is a plain point brush, not swept from the last stroke
     const _downPt = getPointerNDC(e);
     _lastStrokeClientPt = { x: _downPt.cx, y: _downPt.cy };
     // Pick part mode wins over every other tool while it's on — a tap anywhere on the map is
@@ -8614,10 +8645,27 @@
     updateBrushHoverIndicator();
     if (orbitOverride || ORBIT_MODES.includes(m) || !isPointerDown) return;
     if (m === 'select' || m === 'road' || m === 'water' || m === 'mountain') { _lastStrokeClientPt = { x: pt.cx, y: pt.cy }; return; } // single-tap tools
+
+    // 3D vertex sculpting (raise/lower/smooth/flatten/slope/terrace/crater/valley) walks EVERY
+    // vertex of the mesh on each call, then recomputes normals — one full pass is already real work,
+    // and stamping that up to 20x per move event (the screen-space walk below) multiplied it into
+    // visible frame stutter, worse now that the mesh is 3x denser than before. sculptAt/sculptCustomAt
+    // instead sweep the whole segment from the last stamp to this one in that SAME single pass (see
+    // _segNearestOffset / _lastSculptWorldPt), so one call per move event already covers a fast swipe
+    // continuously — no gaps, no repeated full-mesh cost.
+    if (workspace === 'terrain' && SCULPT_MODES.includes(m)) {
+      handleTerrainAtPointer();
+      _lastStrokeClientPt = { x: pt.cx, y: pt.cy };
+      return;
+    }
+
     const stamp = workspace === 'character' ? paintCharacterAtPointer : handleTerrainAtPointer;
-    // Walk from the last stamped point to this one in screen space, stamping every STROKE_STEP_PX
-    // along the way, instead of only at the new point — this is what turns a fast swipe's gappy
-    // dabs back into a continuous line, matching what a slow drag already looked like.
+    // Cheap 2D canvas dabs (texture paint, ground paint) and per-point placement (vegetation, delete
+    // brush) don't have that per-call full-mesh cost, so the screen-space walk below is effectively
+    // free — keep filling gaps that way for these. Walk from the last stamped point to this one in
+    // screen space, stamping every STROKE_STEP_PX along the way, instead of only at the new point —
+    // this is what turns a fast swipe's gappy dabs back into a continuous line, matching what a slow
+    // drag already looked like.
     if (_lastStrokeClientPt) {
       const dx = pt.cx - _lastStrokeClientPt.x, dy = pt.cy - _lastStrokeClientPt.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -8637,6 +8685,7 @@
     // that also means it fires for pointerups on unrelated UI like the bottom-sheet handle — skip
     // work entirely unless a map-editing gesture was actually in progress.
     _lastStrokeClientPt = null;
+    _lastSculptWorldPt = null;
     if (!isPointerDown) return;
     if (terrainMode === 'deletebrush' && pendingDeleteIds.length) finishDeleteBrush();
     if (terrainMode === 'deletebrush' && grassDeleteBatch.length) finishGrassDeleteStroke();
