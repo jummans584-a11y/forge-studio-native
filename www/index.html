@@ -3587,7 +3587,11 @@
   let terrainHeightLockMax = 3;
   let terrainErosionIterations = 6; // passes per "Simulate Erosion" tap
   let terrainDockTab = 'sculpt'; // sculpt | paint | import
-  let TERRAIN_SEG = 384; // 3x the old 128 — denser mesh so a small brush finds several verts to push instead of spiking one
+  let TERRAIN_SEG = 160; // was pushed to 384 (3x the old 128) for finer brush precision, but that's
+  // ~148k verts for the ground alone — well past what the Resolution slider itself allows (max 200,
+  // see sRes below) and heavy enough on its own to cause stutter, before any paint/sculpt cost on
+  // top. 160 keeps most of that extra precision over the original 128 while staying inside the
+  // slider's own intended range and mobile-safe.
   let TERRAIN_SIZE = 8;
   let terrainIsCustom = false;      // true when the ground came from an imported FBX/GLB map model
   let terrainTooDense = false;      // true when the imported map is too heavy to paint per-surface
@@ -5859,8 +5863,22 @@
   }
   // Redraws the surface's real display canvas (and flags its texture dirty) from its visible
   // layers, bottom to top — the one place "layers" actually become pixels the 3D view shows.
+  //
+  // This is the expensive step (full-canvas clear + redraw of every layer at TEX_SIZE, plus the
+  // GPU texture re-upload that needsUpdate triggers), NOT the brush dab itself. onMove's fast-drag
+  // gap fill can call the paint stamp up to STROKE_MAX_STEPS (20) times for a single reported
+  // pointer move, so calling this unconditionally on every dab meant up to 20 full-texture
+  // recomposites+uploads per move event — the actual source of the paint-tool stutter, worse once
+  // TEX_SIZE grew to 2K/4K. _suppressPaintComposite lets a stroke's interpolated dabs share one
+  // deferred composite instead: see flushPaintComposite(), called once after the dabs are done.
+  let _suppressPaintComposite = 0;
+  const _pendingPaintComposites = new Set();
   function compositePaintTarget(target) {
     if (!target || !target.ctx || !target.layers) return;
+    if (_suppressPaintComposite > 0) { _pendingPaintComposites.add(target); return; }
+    _doCompositePaintTarget(target);
+  }
+  function _doCompositePaintTarget(target) {
     const ctx = target.ctx, w = ctx.canvas.width, h = ctx.canvas.height;
     ctx.clearRect(0, 0, w, h);
     target.layers.forEach(l => {
@@ -5870,6 +5888,11 @@
     });
     ctx.globalAlpha = 1;
     target.texture.needsUpdate = true;
+  }
+  function flushPaintComposite() {
+    if (!_pendingPaintComposites.size) return;
+    _pendingPaintComposites.forEach(_doCompositePaintTarget);
+    _pendingPaintComposites.clear();
   }
   function clearAllPaintLayers(target, baseColor) {
     if (!target || !target.ctx) return;
@@ -8666,6 +8689,11 @@
     // screen space, stamping every STROKE_STEP_PX along the way, instead of only at the new point —
     // this is what turns a fast swipe's gappy dabs back into a continuous line, matching what a slow
     // drag already looked like.
+    // Every stamp() below can call compositePaintTarget(); suppress its work while we're stamping
+    // this whole gesture (real point + any interpolated gap-fill points) and flush once at the end,
+    // so a fast swipe still gets one full-texture recomposite+upload instead of up to
+    // STROKE_MAX_STEPS of them. See compositePaintTarget's comment for why that matters.
+    _suppressPaintComposite++;
     if (_lastStrokeClientPt) {
       const dx = pt.cx - _lastStrokeClientPt.x, dy = pt.cy - _lastStrokeClientPt.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -8678,6 +8706,8 @@
       setPointerFromClient(pt.cx, pt.cy); // restore the real (final) point before the last stamp
     }
     stamp();
+    _suppressPaintComposite--;
+    flushPaintComposite();
     _lastStrokeClientPt = { x: pt.cx, y: pt.cy };
   }
   function onUp() {
