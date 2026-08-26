@@ -2823,19 +2823,6 @@
 
     const texture = new THREE.CanvasTexture(canvasTex);
     texture.encoding = THREE.sRGBEncoding;
-    // BUGFIX (texture upside-down / labels mirrored on imported maps): the source image was copied
-    // onto canvasTex pixel-for-pixel above via ctx.drawImage — no flip applied. So canvasTex must be
-    // read back with the SAME flipY convention the source texture used, or the two won't match.
-    // THREE.CanvasTexture defaults flipY to true, but GLTFLoader sets flipY = false on every texture
-    // it creates (glTF images are already stored the way WebGL wants them, unflipped). An imported
-    // GLB/GLTF map's baked labels/text (Secluded Island, Central Village, Frostpeak Mountains, etc.)
-    // rendered fine on the ORIGINAL material, but the instant this function rebuilt it as a canvas
-    // texture for painting, it silently switched back to flipY=true — flipping the whole texture
-    // (and every label on it) upside down relative to the correctly-positioned geometry underneath,
-    // which is exactly what made a sculpt near one label look like it landed somewhere else entirely.
-    // Inheriting the source's flipY here keeps the new paintable canvas visually identical to what
-    // was actually imported, for every format (glTF/GLB, FBX, OBJ, etc.), not just fixing GLB.
-    if (srcTex) texture.flipY = srcTex.flipY;
 
     const mat = new THREE.MeshStandardMaterial({
       map: texture,
@@ -9299,11 +9286,12 @@
 
     const PRIMARY = [
       ['sculpt', '⛰', 'Sculpt'], ['paint', '🎨', 'Paint'], ['object', '🖐', 'Object'],
-      ['blocks', '🧱', 'Blocks'], ['vegetation', '🌳', 'Vegetation']
+      ['blocks', '🧱', 'Blocks'], ['vegetation', '🌳', 'Vegetation'],
+      ['import', '🖼️', 'Heightmap'], ['export', '📤', 'Export']
     ];
     const SECONDARY = [
       ['material', '🎛 Material'], ['erosion', '🌊 Erosion'], ['road', '🛣 Road'], ['water', '💧 Water'], ['layers', '📚 Layers'],
-      ['optimize', '⚙ Optimize'], ['import', '📥 Import & Size'], ['export', '📤 Export']
+      ['optimize', '⚙ Optimize']
     ];
     const selectTab = (t) => {
       terrainDockTab = t;
@@ -10999,7 +10987,61 @@
     dock.appendChild(note);
   }
 
+  // Standalone, self-contained "Generate Heightmap from Image" button — the entire pipeline
+  // (file picker -> load image -> build/ensure ground -> bake heights -> activate -> refresh)
+  // lives inside this one function so the button never depends on any other tab/menu being open.
+  function heightmapFromImageButtonAction() {
+    let tempInput = document.getElementById('temp-heightmap-image-input');
+    if (!tempInput) {
+      tempInput = document.createElement('input');
+      tempInput.type = 'file';
+      tempInput.accept = 'image/*';
+      tempInput.id = 'temp-heightmap-image-input';
+      tempInput.style.display = 'none';
+      document.body.appendChild(tempInput);
+    }
+    tempInput.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      tempInput.value = '';
+      if (!file) return;
+
+      // Make sure there's procedural ground to paint the heights onto — if an imported map
+      // model is active (or nothing exists yet), start a fresh procedural ground first.
+      if (terrainIsCustom || !terrainMesh) {
+        buildTerrain(TERRAIN_SIZE || 16, TERRAIN_SEG || 384);
+      } else {
+        warnIfOverwritingSculpt();
+      }
+
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        terrainHeightmapImg = img;          // white=high, black=low, gray=medium
+        terrainHeightmapIsGenerated = false; // came from a real image, not the procedural generator
+        applyHeightmapToTerrain({ isNewUpload: true }); // bakes the image into terrain vertex heights
+        activateTerrain();
+        refreshUI();
+        toast('Heightmap image applied — light areas became hills, dark areas became valleys.', 3200);
+        // Not revoking the object URL: the Image element needs to stay alive so Height/Base
+        // Height/Contrast/Smoothness/Resolution sliders can keep re-baking from it later.
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); toast('Could not load that image as a heightmap.', 2000); };
+      img.src = url;
+    };
+    tempInput.click();
+  }
+
   function buildImportTab() {
+    const actionsHM = document.createElement('div'); actionsHM.className = 'row actions';
+    const bHM = document.createElement('button'); bHM.className = 'btn primary'; bHM.textContent = '🖼️ Generate Heightmap (from Image)';
+    bHM.onclick = () => heightmapFromImageButtonAction();
+    actionsHM.appendChild(bHM); dock.appendChild(actionsHM);
+    const noteHM = document.createElement('p');
+    noteHM.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:4px 2px 12px;line-height:1.5;';
+    noteHM.textContent = 'Pick a grayscale image and 3D terrain is generated immediately (white = high, black = low). Fully self-contained — works no matter what else is open.';
+    dock.appendChild(noteHM);
+    dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
+
     const secLabel0 = document.createElement('div'); secLabel0.className = 'sec-label'; secLabel0.textContent = 'Import a full map / terrain model';
     dock.appendChild(secLabel0);
     const actions0 = document.createElement('div'); actions0.className = 'row actions';
