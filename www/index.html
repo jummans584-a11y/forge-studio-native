@@ -1116,6 +1116,7 @@
       </div>
       <div id="assetLibraryHeaderBtns">
         <button class="btn" id="assetLibraryOptimizeBtn" title="When on, models you pick are auto-decimated (lighter, faster to scatter) — no prompt each time">⚡ Optimize</button>
+        <button class="btn" id="assetLibraryUnlockBtn" title="Watch a short ad to unlock +10 more library slots, permanently">🔓 +10 slots</button>
         <button class="btn" id="assetLibrarySelectBtn">☑ Select</button>
         <button class="btn" id="assetLibraryPickBtn" title="OFF: every tap (library card or model on the map) just uses/places the whole thing directly, no popup. ON: tap a multi-item pack's card, or any model already on the map, to pick/save one piece from it">🎯 Pick part</button>
         <button class="btn primary" id="assetLibraryAddBtn">+ Add models</button>
@@ -1545,6 +1546,7 @@
   const assetLibrarySearch = document.getElementById('assetLibrarySearch');
   const assetLibrarySelectBtn = document.getElementById('assetLibrarySelectBtn');
   const assetLibraryOptimizeBtn = document.getElementById('assetLibraryOptimizeBtn');
+  const assetLibraryUnlockBtn = document.getElementById('assetLibraryUnlockBtn');
   const assetLibrarySelectBar = document.getElementById('assetLibrarySelectBar');
   const assetLibrarySelectCount = document.getElementById('assetLibrarySelectCount');
   const assetVariantPrompt = document.getElementById('assetVariantPrompt');
@@ -2363,8 +2365,10 @@
   // AdMob rewarded-ad call there (see the TODO) once the rewarded ad unit is set up; everything else
   // here just reacts to the reward.
   //
-  // LIBRARY: each ad watched grants +5 extra permanent slots (stacks — watch 3 times, get +15).
-  // Persisted in localStorage, so credits are never lost, only spent by saving more models.
+  // LIBRARY: each ad watched grants +10 extra permanent slots (stacks — watch 3 times, get +30).
+  // Persisted in localStorage, so credits are never lost, only spent by saving more models. If no
+  // ad is available or it fails to play, the slots are still granted (see alwaysGrant below) so a
+  // missing fill never blocks saving.
   //
   // 4K TEXTURES: NOT a one-time unlock — it's spent per use. Watching the ad sets a SESSION-ONLY
   // flag (plain JS variable, not localStorage), good until the app/page is closed or reloaded. Next
@@ -2372,7 +2376,7 @@
   // session ke liye 4K mil jaaye, agli baar phir dekhna" rather than a forever unlock.
   // ============================================================
   const LIBRARY_CREDIT_KEY = 'forge_library_bonus_slots';
-  const LIBRARY_CREDIT_PER_AD = 5;
+  const LIBRARY_CREDIT_PER_AD = 10;
   function getLibraryBonusSlots() {
     try { return parseInt(localStorage.getItem(LIBRARY_CREDIT_KEY), 10) || 0; } catch (e) { return 0; }
   }
@@ -2386,9 +2390,15 @@
   // only fire once the person has actually watched the ad through, not just tapped to start it.
   // Two separate rewarded ad units recommended (one for library, one for 4K) so AdMob reports each
   // placement's performance separately — pass whichever ID applies via adUnitId.
-  function showRewardedAdToUnlock(featureLabel, adUnitId, onReward) {
+  //
+  // alwaysGrant: when true, onReward() still fires even if no ad was available/shown or it failed
+  // to load/play — used for the library slot unlock so a missing fill (or testing outside the
+  // packaged app) never blocks the person from getting their extra slots. Leave false (default) for
+  // unlocks that should only ever be earned by actually finishing an ad (e.g. the 4K unlock).
+  function showRewardedAdToUnlock(featureLabel, adUnitId, onReward, alwaysGrant) {
     const plugin = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob;
     if (!plugin) {
+      if (alwaysGrant) { onReward(); toast(featureLabel, 2600); return; }
       toast('Ads aren\'t available outside the packaged app — this unlock only works in the installed APK.', 3200);
       return;
     }
@@ -2399,6 +2409,7 @@
       .then(() => { onReward(); toast(featureLabel, 2600); })
       .catch((err) => {
         console.warn('Rewarded ad failed:', err);
+        if (alwaysGrant) { onReward(); toast(featureLabel + ' (no ad was available this time)', 3200); return; }
         toast('Ad didn\'t finish, so nothing was unlocked. Try again anytime.', 3200);
       });
   }
@@ -2430,9 +2441,19 @@
       .catch((err) => console.warn('Loading interstitial failed (spinner still shows normally):', err));
   }
 
-  const FREE_LIBRARY_LIMIT = 20; // kept only for reference — no longer enforced, see libraryHasRoomFor below
-  function libraryHasRoomFor(n) { return true; } // library cap removed — unlimited storage
-  function showLibraryLimitPrompt() {} // no-op now that there's no cap to hit
+  const FREE_LIBRARY_LIMIT = 20; // free-tier cap on how many models can be saved in the Asset Library
+  function libraryHasRoomFor(n) { return (libraryAssets.length + n) <= (FREE_LIBRARY_LIMIT + getLibraryBonusSlots()); }
+  function showLibraryLimitPrompt() {
+    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
+    toast('Library is full (' + cap + ' slots used up) — watch a short ad for +' + LIBRARY_CREDIT_PER_AD + ' more slots.', 3400);
+    // alwaysGrant=true: even if no ad fills or the ad SDK errors out, the person still gets their
+    // +10 slots — a missing/failed ad should never be the thing standing between them and saving
+    // their work.
+    showRewardedAdToUnlock('+' + LIBRARY_CREDIT_PER_AD + ' library slots unlocked!', LIBRARY_REWARDED_AD_ID, () => {
+      addLibraryBonusSlots(LIBRARY_CREDIT_PER_AD);
+      renderAssetLibraryGrid();
+    }, true);
+  }
 
   const FREE_TEX_SIZE = 2048, PREMIUM_TEX_SIZE = 4096;
   let tex4kUnlockedThisSession = false; // resets on every app/page reload — see note above
@@ -2802,6 +2823,19 @@
 
     const texture = new THREE.CanvasTexture(canvasTex);
     texture.encoding = THREE.sRGBEncoding;
+    // BUGFIX (texture upside-down / labels mirrored on imported maps): the source image was copied
+    // onto canvasTex pixel-for-pixel above via ctx.drawImage — no flip applied. So canvasTex must be
+    // read back with the SAME flipY convention the source texture used, or the two won't match.
+    // THREE.CanvasTexture defaults flipY to true, but GLTFLoader sets flipY = false on every texture
+    // it creates (glTF images are already stored the way WebGL wants them, unflipped). An imported
+    // GLB/GLTF map's baked labels/text (Secluded Island, Central Village, Frostpeak Mountains, etc.)
+    // rendered fine on the ORIGINAL material, but the instant this function rebuilt it as a canvas
+    // texture for painting, it silently switched back to flipY=true — flipping the whole texture
+    // (and every label on it) upside down relative to the correctly-positioned geometry underneath,
+    // which is exactly what made a sculpt near one label look like it landed somewhere else entirely.
+    // Inheriting the source's flipY here keeps the new paintable canvas visually identical to what
+    // was actually imported, for every format (glTF/GLB, FBX, OBJ, etc.), not just fixing GLB.
+    if (srcTex) texture.flipY = srcTex.flipY;
 
     const mat = new THREE.MeshStandardMaterial({
       map: texture,
@@ -4461,6 +4495,7 @@
     libraryUseOptimized = !libraryUseOptimized;
     assetLibraryOptimizeBtn.classList.toggle('active', libraryUseOptimized);
   };
+  assetLibraryUnlockBtn.onclick = () => showLibraryLimitPrompt();
 
   // Small popup shown after tapping a card in the picker (only when picking for placement) —
   // lets the user choose the full-detail original or a decimated "optimized" copy before it's
@@ -4857,7 +4892,9 @@
   function renderAssetLibraryGrid() {
     renderAssetLibraryFilters();
     assetLibraryGrid.innerHTML = '';
-    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device');
+    const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
+    assetLibraryCount.textContent = libraryAssets.length + (libraryAssets.length === 1 ? ' model saved on this device' : ' models saved on this device') +
+      ' — ' + Math.max(0, cap - libraryAssets.length) + '/' + cap + ' slots left';
     if (!libraryReady) {
       const p = document.createElement('p'); p.style.cssText = 'grid-column:1/-1;font-size:12px;color:var(--ink-dim);text-align:center;padding:30px 10px;';
       p.textContent = 'Loading your library…';
@@ -5174,6 +5211,18 @@
     const { meshCount, verts } = countMeshesAndVerts(obj);
     terrainMeshStats = { meshCount, verts };
     terrainTooDense = meshCount > MAX_PAINTABLE_MESHES || verts > MAX_PAINTABLE_VERTS;
+    // BUGFIX: recompute every mesh's normals fresh from its actual (correct, untouched) vertex
+    // positions right after load. Sculpted terrain saved via Save Project → GLB export/re-import
+    // was coming back with its LIGHTING inverted — every pit shaded like a bump and every mountain
+    // shaded like a pit — even though the real vertex heights round-tripped correctly. That's a
+    // classic "hollow-face" optical illusion: it's the surface normals (which way each face's
+    // "outward" points, used only for lighting) that were getting mangled by the GLB export/import
+    // round-trip, not the actual geometry, but visually it read as the shapes themselves flipping —
+    // and sculpting further on top of the wrongly-lit shape then genuinely confused the real data,
+    // matching "kaam karte karte project kharab ho jaata hai". Recomputing here throws away whatever
+    // normals came from the file and derives fresh ones straight from the real positions, so the
+    // shading always matches the actual terrain regardless of what the round-trip did to normals.
+    obj.traverse(o => { if (o.isMesh && o.geometry) o.geometry.computeVertexNormals(); });
     if (terrainTooDense) {
       obj.traverse(o => { if (o.isMesh && !o.material) o.material = new THREE.MeshStandardMaterial({ color: 0x8a9080, roughness: 0.9 }); });
       forceDoubleSided(obj);
@@ -8760,6 +8809,10 @@
   function exportSceneToGLBBuffer(root, animClips, onDone, onError) {
     if (!root) { onError(new Error('Nothing to export')); return; }
     try { repairImportedTextures(root); } catch (e) {}
+    // Same normals-fix as on load (see applyTerrainObject) applied on the way OUT too — belt and
+    // braces so the GLB always stores normals derived fresh from the real positions, not whatever
+    // stale/mismatched normal data a mesh happened to be carrying at save time.
+    try { root.traverse(o => { if (o.isMesh && o.geometry) o.geometry.computeVertexNormals(); }); } catch (e) {}
     const exporter = new THREE.GLTFExporter();
     const opts = { binary: true, embedImages: true, truncateDrawRange: true };
     if (animClips && animClips.length) opts.animations = animClips;
@@ -11327,23 +11380,12 @@
   // not a function" error the first time this was tried. This debugToast() is fully self-contained
   // (creates its own element) so it works regardless of the main app's internal structure. Once ads
   // are confirmed working, this whole <script> block's debug calls can be removed/simplified.
+  // On-screen debug box removed now that AdMob is confirmed working end to end (banner, consent
+  // fallback, all verified) — this build is going out as the real APK, so no visible debug UI for
+  // end users. Kept as a console.log so it's still inspectable via remote USB debugging if ever
+  // needed again, without showing anything on-screen.
   function admobDebugToast(msg) {
     console.log('[AdMob debug]', msg);
-    let box = document.getElementById('admob-debug-box');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'admob-debug-box';
-      box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:rgba(20,20,25,0.95);color:#ffd479;font:12px/1.4 monospace;padding:8px 30px 8px 10px;border-radius:8px;max-height:40vh;overflow-y:auto;white-space:pre-wrap;box-shadow:0 2px 10px rgba(0,0,0,0.5);';
-      const closeBtn = document.createElement('button');
-      closeBtn.textContent = '✕';
-      closeBtn.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:none;color:#ffd479;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px;';
-      closeBtn.onclick = () => box.remove();
-      box.appendChild(closeBtn);
-      document.body.appendChild(box);
-    }
-    const line = document.createElement('div');
-    line.textContent = '• ' + msg;
-    box.appendChild(line);
   }
   window.addEventListener('load', () => {
     try {
