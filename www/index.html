@@ -3622,14 +3622,25 @@
   let terrainHeightmapHeightScale = 2.2; // "Terrain Height" control — low = shallow terrain, high = tall mountains
   let terrainHeightmapBaseHeight = 0;    // "Base Height" control — shifts the whole terrain up/down, shape unchanged
   let terrainHeightmapContrast = 1;      // "Contrast" control — low = softer elevation differences, high = stronger mountains/valleys
-  let terrainHeightmapSmoothness = 1;    // "Smoothness" control — number of blur passes over the height grid, 0 = off (low = jagged, high = smooth)
+  let terrainHeightmapSmoothness = 0;    // "Smoothness" control — number of blur passes over the height grid, 0 = off (low = jagged, high = smooth). Default 0 (was 1) now that the hidden browser-resize blur is gone, so pits/hills come in at their true source size unless the user asks for softening.
+  let terrainHeightmapFeatureSharpness = 1; // "Feature Sharpness" — blur kernel radius per smoothness pass, in grid cells.
+    // 1 = a tight 3x3 blur (default, matches old behavior). Lower this to shrink how far each pass
+    // spreads a small pit/hill; this is what actually controls footprint size, independent of how
+    // ROUNDED the edges look (that's still Smoothness). Fixes pits reading 2-3x larger than their
+    // source-image footprint: previously the initial image->grid resize always ran through the
+    // browser's own bilinear/bicubic resampling (imageSmoothingEnabled defaults to true on every new
+    // canvas), which silently softened + spread every small feature BEFORE the Smoothness slider ever
+    // saw it, uncontrollably and even when Smoothness was set to 0. That resample now forces nearest-
+    // neighbor (imageSmoothingEnabled = false — see applyHeightmapToTerrain) so a pit's on-terrain
+    // footprint actually matches its footprint in the source image at Smoothness 0, and Smoothness /
+    // Feature Sharpness become the ONLY two things that round or spread it from there.
   let terrainHeightmapInvert = false;    // "Invert Heightmap" — black becomes high, white becomes low
   let terrainHeightmapNormalize = 0;     // "Normalize" 0-100 — blends toward a full min/max stretch of the actual height data, shape-preserving
   // Caches the resampled+blurred 0..1 height grid keyed by (image, resolution, smoothness) so
   // dragging the Terrain Height slider — which only rescales, never reshapes — doesn't redo the
   // image resample + box-blur passes on every 'input' tick. That redo is the expensive part on
   // Android; skipping it keeps Height fully live-feeling even at high Resolution/Smoothness.
-  let _hmGridCache = { img: null, res: -1, smoothness: -1, grid: null };
+  let _hmGridCache = { img: null, res: -1, smoothness: -1, sharpness: -1, grid: null };
   // True once a Mountain/Pit/Smooth/Flatten stroke or a Mountain+ placement has touched the
   // heightmap-generated terrain. Height/Smoothness stay fully live per Phase 2A, but they
   // regenerate every vertex from the source image — so once this is true, moving them again would
@@ -5428,16 +5439,25 @@
 
     const res = TERRAIN_SEG + 1;
     const smoothKey = Math.max(0, Math.round(terrainHeightmapSmoothness));
+    const sharpKey = Math.max(1, Math.round(terrainHeightmapFeatureSharpness));
     let grid, gMin, gMax;
-    if (_hmGridCache.img === terrainHeightmapImg && _hmGridCache.res === res && _hmGridCache.smoothness === smoothKey && _hmGridCache.grid) {
-      // Same image, same resolution, same smoothness as last time — only Height/Base/Contrast/
-      // Invert/Normalize moved, so reuse the already-resampled/blurred grid (and its cached min/max)
-      // instead of redoing that work on this tick.
+    if (_hmGridCache.img === terrainHeightmapImg && _hmGridCache.res === res && _hmGridCache.smoothness === smoothKey && _hmGridCache.sharpness === sharpKey && _hmGridCache.grid) {
+      // Same image, same resolution, same smoothness/sharpness as last time — only Height/Base/
+      // Contrast/Invert/Normalize moved, so reuse the already-resampled/blurred grid (and its cached
+      // min/max) instead of redoing that work on this tick.
       grid = _hmGridCache.grid; gMin = _hmGridCache.gMin; gMax = _hmGridCache.gMax;
     } else {
       const off = document.createElement('canvas');
       off.width = res; off.height = res;
       const octx = off.getContext('2d');
+      // FIX: canvas 2D defaults imageSmoothingEnabled to true, which runs the source image through
+      // the browser's own bilinear/bicubic resampler here — completely outside the Smoothness slider's
+      // control, and even active when Smoothness is 0. That hidden blur was what made small pits/hills
+      // consistently come out looking 2-3x wider and rounder than their actual footprint in the source
+      // image. Forcing nearest-neighbor here means a feature's on-terrain size now matches its source
+      // pixel footprint exactly at Smoothness 0 — any spreading/rounding from here on is only the
+      // Smoothness + Feature Sharpness controls below, both of which the user can dial down to 0.
+      octx.imageSmoothingEnabled = false;
       octx.drawImage(terrainHeightmapImg, 0, 0, res, res);
       const data = octx.getImageData(0, 0, res, res).data;
 
@@ -5445,16 +5465,21 @@
       grid = new Float32Array(res * res);
       for (let i = 0; i < res * res; i++) grid[i] = data[i * 4] / 255;
 
-      // Smoothness: repeated 3x3 box blur passes over the height grid before it touches any vertex,
-      // so jagged/noisy source images don't produce spiky terrain.
+      // Smoothness: repeated box blur passes over the height grid before it touches any vertex, so
+      // jagged/noisy source images don't produce spiky terrain. Feature Sharpness sets the kernel
+      // radius per pass (1 = tight 3x3, same as before; 2 = 5x5, 3 = 7x7) — this is what actually
+      // controls how far a pit/hill's footprint spreads with each pass, independent of how many passes
+      // (Smoothness) run. Keep sharpness at 1 and lower/zero Smoothness to preserve small features
+      // exactly; raise either one for softer, wider terrain shaping.
       const passes = smoothKey;
+      const kr = sharpKey;
       for (let p = 0; p < passes; p++) {
         const next = new Float32Array(res * res);
         for (let row = 0; row < res; row++) {
           for (let col = 0; col < res; col++) {
             let sum = 0, count = 0;
-            for (let dr = -1; dr <= 1; dr++) {
-              for (let dc = -1; dc <= 1; dc++) {
+            for (let dr = -kr; dr <= kr; dr++) {
+              for (let dc = -kr; dc <= kr; dc++) {
                 const r = row + dr, c = col + dc;
                 if (r >= 0 && r < res && c >= 0 && c < res) { sum += grid[r * res + c]; count++; }
               }
@@ -5466,7 +5491,7 @@
       }
       gMin = Infinity; gMax = -Infinity;
       for (let i = 0; i < res * res; i++) { if (grid[i] < gMin) gMin = grid[i]; if (grid[i] > gMax) gMax = grid[i]; }
-      _hmGridCache = { img: terrainHeightmapImg, res: res, smoothness: smoothKey, grid: grid, gMin: gMin, gMax: gMax };
+      _hmGridCache = { img: terrainHeightmapImg, res: res, smoothness: smoothKey, sharpness: sharpKey, grid: grid, gMin: gMin, gMax: gMax };
     }
 
     if (!opts.skipUndo) terrainSaveUndo();
@@ -9498,6 +9523,15 @@
       applyHeightmapToTerrain({ skipUndo: true });
     }, (v) => String(v));
 
+    // "Feature Sharpness" — blur kernel radius per Smoothness pass. Keep this at 1 (or Smoothness at
+    // 0) to make small pits/hills come out at their true source-image size; raise it to let each
+    // Smoothness pass spread features further (softer, rounder, but wider terrain shapes).
+    const sSharp = mkSlider(1, 3, 1, terrainHeightmapFeatureSharpness, (v) => {
+      terrainHeightmapFeatureSharpness = v;
+      warnIfOverwritingSculpt();
+      applyHeightmapToTerrain({ skipUndo: true });
+    }, (v) => String(v));
+
     const sNorm = mkSlider(0, 100, 1, terrainHeightmapNormalize, (v) => {
       terrainHeightmapNormalize = v;
       warnIfOverwritingSculpt();
@@ -9515,6 +9549,7 @@
       mkField('📐', 'Base height', sBase),
       mkField('🌗', 'Contrast', sContrast),
       mkField('🫧', 'Smoothness', sSmooth),
+      mkField('🔎', 'Feature sharpness', sSharp),
       mkField('⚖️', 'Normalize', sNorm),
       mkField('🔳', 'Resolution', sRes),
     ]));
