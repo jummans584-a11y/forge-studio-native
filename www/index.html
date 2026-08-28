@@ -2608,6 +2608,66 @@
     return found.length;
   }
 
+  // Reverses the winding of every triangle in a geometry (indexed or not), for every relevant
+  // per-vertex attribute (position/normal/uv/uv2/color). Reversing winding doesn't move a single
+  // vertex or change the mesh's silhouette at all — it only flips which way each triangle's
+  // "front" faces, which is exactly (and only) what needs correcting on a mirrored mesh.
+  function reverseGeometryWinding(geo) {
+    const swapTriples = (attr) => {
+      if (!attr) return;
+      const size = attr.itemSize;
+      const tmp = new Array(size);
+      for (let i = 0; i + 2 < attr.count; i += 3) {
+        for (let k = 0; k < size; k++) tmp[k] = attr.getComponent(i + 1, k);
+        for (let k = 0; k < size; k++) attr.setComponent(i + 1, k, attr.getComponent(i + 2, k));
+        for (let k = 0; k < size; k++) attr.setComponent(i + 2, k, tmp[k]);
+      }
+      attr.needsUpdate = true;
+    };
+    if (geo.index) {
+      const arr = geo.index.array;
+      for (let i = 0; i + 2 < arr.length; i += 3) { const t = arr[i + 1]; arr[i + 1] = arr[i + 2]; arr[i + 2] = t; }
+      geo.index.needsUpdate = true;
+    } else {
+      swapTriples(geo.attributes.position);
+    }
+    swapTriples(geo.attributes.normal);
+    swapTriples(geo.attributes.uv);
+    swapTriples(geo.attributes.uv2);
+    swapTriples(geo.attributes.color);
+  }
+
+  // FBX/GLB files very commonly bake a MIRRORED transform onto some node in the hierarchy — a
+  // Blender/Maya "negative scale" used to flip a duplicated part, or a leftover from a Z-up→Y-up
+  // axis conversion the original authoring app applied. A mirror transform doesn't change how the
+  // mesh looks (three.js renders it fine either way), but it silently reverses the *effective*
+  // winding of every triangle underneath it in world space. That reversed winding is what
+  // computeVertexNormals() reads to decide which way is "outward" AND — separately — exactly what
+  // three.js's own raycaster reads to compute hit.face.normal (it derives the face normal fresh
+  // from the triangle's vertex winding, not from the stored normal attribute). So on a mirrored
+  // ground mesh both come out flipped: shading looks like an optical-illusion "hollow face" (see
+  // the computeVertexNormals fix right below this), AND every raycast against that surface reports
+  // it facing roughly straight DOWN instead of up. Vegetation's slope filter (which only accepts
+  // hits within vegSlopeMin–vegSlopeMax degrees of "up") then silently rejects every single tap on
+  // that ground — nothing looks wrong, painting/sculpting still basically work since they only need
+  // vertex positions, but vegetation placement fails 100% of the time, matching "vegetation ekdum
+  // kaam nahi karta jab main map import karta hoon". Detect any mesh living under a mirrored
+  // (negative-determinant) transform and reverse its winding to cancel the mirror out, so both
+  // shading and raycasting see the surface facing the way it actually does.
+  function fixMirroredMeshWinding(root) {
+    root.updateMatrixWorld(true);
+    let fixed = 0;
+    root.traverse(o => {
+      if (!o.isMesh || !o.geometry) return;
+      const e = o.matrixWorld.elements;
+      const det = e[0] * (e[5] * e[10] - e[6] * e[9])
+                - e[1] * (e[4] * e[10] - e[6] * e[8])
+                + e[2] * (e[4] * e[9] - e[5] * e[8]);
+      if (det < 0) { reverseGeometryWinding(o.geometry); fixed++; }
+    });
+    return fixed;
+  }
+
   // A texture's tex.image can be an HTMLImageElement whose decode is still in progress at the
   // moment we check it — this is far more likely for a LARGE shared/combined texture (one atlas
   // image referenced by many materials) than for a small texture used by only one material, since
@@ -5220,6 +5280,13 @@
     // matching "kaam karte karte project kharab ho jaata hai". Recomputing here throws away whatever
     // normals came from the file and derives fresh ones straight from the real positions, so the
     // shading always matches the actual terrain regardless of what the round-trip did to normals.
+    // FIX: un-mirror any mesh sitting under a negative-scale (mirrored) transform BEFORE computing
+    // normals — otherwise computeVertexNormals() faithfully recomputes the WRONG (flipped) normals
+    // from the mirrored winding, and every raycast against that surface (vegetation's slope check,
+    // ground-lock, "align to ground") sees it facing down instead of up. See fixMirroredMeshWinding
+    // above for the full story — this is the actual cause of vegetation refusing to place at all on
+    // imported maps.
+    fixMirroredMeshWinding(obj);
     obj.traverse(o => { if (o.isMesh && o.geometry) o.geometry.computeVertexNormals(); });
     if (terrainTooDense) {
       obj.traverse(o => { if (o.isMesh && !o.material) o.material = new THREE.MeshStandardMaterial({ color: 0x8a9080, roughness: 0.9 }); });
@@ -6548,7 +6615,22 @@
   // above it or sinking into it. Off by default per object (toggled in the right-side ⚓ button);
   // applied live from the gizmo's 'objectChange' event, below. ----------
   function groundRaycastTargets() {
-    if (terrainIsCustom) return terrainPaintMeshes.map(p => p.mesh); // the imported map's own surfaces, captured before any object was ever placed — never includes vegetationGroup, so a locked object can't "ground" on itself or on another placed object
+    if (terrainIsCustom) {
+      if (terrainPaintMeshes.length) return terrainPaintMeshes.map(p => p.mesh); // the imported map's own surfaces, captured before any object was ever placed
+      // FIX: terrainPaintMeshes is only ever populated for maps under the paintable mesh/vert
+      // budget (see terrainTooDense) — for a real, heavy imported map it stays empty forever, which
+      // silently made Ground Lock and Align-to-Ground into no-ops on exactly the maps people
+      // actually upload. Fall back to walking terrainRoot directly, still excluding vegetationGroup
+      // so a locked object still can't "ground" on itself or on another placed object.
+      if (!terrainRoot) return [];
+      const list = [];
+      terrainRoot.traverse(o => {
+        if (!o.isMesh) return;
+        for (let p = o.parent; p; p = p.parent) { if (p === vegetationGroup) return; } // skip anything nested under a placed object's own group, not just direct children
+        list.push(o);
+      });
+      return list;
+    }
     return terrainMesh ? [terrainMesh] : [];
   }
   function snapEntryToGround(entry) {
