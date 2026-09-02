@@ -1643,6 +1643,14 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 2400);
   }
 
+  // TEMP DIAGNOSTIC — build/version marker so it's obvious from the very first screen whether a
+  // freshly-installed APK is actually running this updated code, or whether Android kept/reopened an
+  // older build. If this toast does NOT appear on launch, the export-fix code below can't be running
+  // either, no matter what — uninstall the app completely (not just reinstall) and rebuild from this
+  // exact zip. Safe to delete this whole block (search "TEMP DIAGNOSTIC") once export is confirmed
+  // fixed and this has done its job.
+  setTimeout(() => toast('Build marker: export-fix-v2 (' + new Date().toISOString() + ')', 4000), 1200);
+
   // ---------- Undo toast: shows after a delete, gives a 30s window to reverse it. ----------
   // Used for Asset Library deletes (single "×" and multi-select "Delete selected") so an accidental
   // tap doesn't need to be caught before it happens — it can just be reversed right after.
