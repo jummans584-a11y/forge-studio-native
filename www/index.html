@@ -11236,31 +11236,88 @@
   // the native Share sheet so the person can save it to Downloads, Drive, WhatsApp, wherever they
   // want. Falls back to the old browser-download behavior when not running as a packaged app (i.e.
   // still works exactly as before in forge-studio-browser-test.html) or if anything above fails.
+  // BUGFIX 2 (large exports hang/silently die in the packaged APK): the previous fix wrote the
+  // WHOLE file in one Filesystem.writeFile call with the entire base64 string built in memory via
+  // a single FileReader.readAsDataURL on the full blob. For a heavy GLB (embedded textures, big
+  // meshes) that's tens/hundreds of MB crossing the JS<->native bridge in one message — on real
+  // devices that either hangs indefinitely (no error, no toast, looks frozen) or the bridge just
+  // drops/crashes the call.
+  // Fix: stream it — slice the blob into small byte-range chunks, base64-encode EACH CHUNK ON ITS
+  // OWN (so every chunk is a complete, independently-valid base64 string — no risk of splitting a
+  // base64 "word" across calls), write the first chunk with Filesystem.writeFile and the rest with
+  // Filesystem.appendFile. Every single native/bridge call is wrapped in withTimeout(), so if the
+  // bridge ever does stall on one call, the user gets a toast within a few seconds instead of the
+  // app just sitting there looking hung.
+  function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error((label || 'Operation') + ' timed out after ' + Math.round(ms / 1000) + 's')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  function blobToBase64(blob, timeoutMs) {
+    return withTimeout(new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1] || '');
+      reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+      reader.readAsDataURL(blob);
+    }), timeoutMs, 'Reading file chunk');
+  }
+
+  // Writes `blob` to `filename` inside `directory` in ~750KB chunks (comfortably under typical
+  // bridge message-size limits). Returns the Filesystem.getUri() result on success. Throws (with
+  // whatever partial file gets cleaned up by the caller) on the first chunk that fails or times out.
+  async function writeBlobChunked(blob, filename, directory, onProgress) {
+    const { Filesystem } = Capacitor.Plugins;
+    const CHUNK_BYTES = 768 * 1024;
+    const OP_TIMEOUT_MS = 15000;
+    const total = blob.size;
+    let offset = 0;
+    let first = true;
+    while (offset < total || (total === 0 && first)) {
+      const end = Math.min(offset + CHUNK_BYTES, total);
+      const chunkBlob = blob.slice(offset, end);
+      const base64 = await blobToBase64(chunkBlob, OP_TIMEOUT_MS);
+      if (first) {
+        await withTimeout(
+          Filesystem.writeFile({ path: filename, data: base64, directory, recursive: true }),
+          OP_TIMEOUT_MS, 'Writing file'
+        );
+        first = false;
+      } else if (base64) {
+        await withTimeout(
+          Filesystem.appendFile({ path: filename, data: base64, directory }),
+          OP_TIMEOUT_MS, 'Writing file'
+        );
+      }
+      offset = end;
+      if (onProgress && total > 0) onProgress(offset, total);
+      if (total === 0) break;
+    }
+    return withTimeout(Filesystem.getUri({ path: filename, directory }), OP_TIMEOUT_MS, 'Finalizing file');
+  }
+
   async function downloadDataUrl(dataUrl, filename) {
     const isNative = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
     if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
-      let base64;
+      let blob;
       try {
-        if (dataUrl.startsWith('data:')) {
-          base64 = dataUrl.split(',')[1];
-        } else {
-          // blob: URL — pull the bytes back out and re-encode as base64 for the Filesystem plugin,
-          // which only accepts base64 (or plain text) data, not blob/object URLs.
-          const resp = await fetch(dataUrl);
-          const blob = await resp.blob();
-          base64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(',')[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }
+        const resp = await fetch(dataUrl); // works for both data: and blob: URLs
+        blob = await resp.blob();
       } catch (err) {
         console.error('Failed to read export data for native save:', err);
         toast('Export failed: could not read file data.', 3200);
         return;
       }
       const { Filesystem } = Capacitor.Plugins;
+      const bigFile = blob.size > 4 * 1024 * 1024;
+      let progressToastShown = false;
+      const onProgress = bigFile ? (done, total) => {
+        const pct = Math.round((done / total) * 100);
+        toast('Saving ' + filename + '… ' + pct + '%', 900);
+        progressToastShown = true;
+      } : null;
       // BUGFIX (real root cause of "export never works" in the packaged APK): Directory.Documents
       // on Android maps to a *public* Documents folder on Android 10 and older, which needs
       // READ/WRITE_EXTERNAL_STORAGE permission that this app never declares or requests — so
@@ -11268,32 +11325,37 @@
       // Android too. Directory.Cache is always a private, app-only folder that needs zero
       // permission on every Android version, and Capacitor's default FileProvider config already
       // exposes it for sharing — so this is the one directory guaranteed to work everywhere.
-      const tryWrite = async (directory) => Filesystem.writeFile({ path: filename, data: base64, directory, recursive: true });
+      const tryWrite = (directory) => writeBlobChunked(blob, filename, directory, onProgress);
       let written;
       try {
         written = await tryWrite('CACHE');
       } catch (err1) {
         console.error('Write to Cache failed, trying Data:', err1);
+        try { await Filesystem.deleteFile({ path: filename, directory: 'CACHE' }); } catch (_) {}
         try {
           written = await tryWrite('DATA');
         } catch (err2) {
-          console.error('Native file save failed entirely, falling back to browser download:', err2);
-          toast('Native save failed: ' + (err2 && err2.message ? err2.message : JSON.stringify(err2)), 4200);
+          console.error('Native file save failed entirely:', err2);
+          try { await Filesystem.deleteFile({ path: filename, directory: 'DATA' }); } catch (_) {}
+          const msg = (err2 && err2.message) ? err2.message : 'unknown error';
+          toast('Save failed: ' + msg + ' — try a smaller export, or free up storage and retry.', 5000);
           written = null;
         }
       }
       if (written) {
         if (Capacitor.Plugins.Share) {
-          try { await Capacitor.Plugins.Share.share({ title: filename, url: written.uri }); }
-          catch (e) { toast('Share sheet closed/cancelled — file is saved at: ' + written.uri, 4200); }
+          try { await withTimeout(Capacitor.Plugins.Share.share({ title: filename, url: written.uri }), 15000, 'Opening share sheet'); }
+          catch (e) { toast('File saved — ' + filename + ' (share sheet didn\'t open: ' + (e && e.message || 'cancelled') + ')', 4200); }
         } else {
           toast('Saved — ' + filename, 2600);
         }
         if (dataUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(dataUrl), 4000);
         return;
       }
-      // fall through to the browser-download path below (won't work in the packaged APK either,
-      // but keeps behavior identical to before if native save fails for an unexpected reason)
+      // Deliberately no fallback to the browser-download path here: on a packaged Capacitor APK
+      // that path is a silent no-op (see BUGFIX above), so "falling through" to it used to just
+      // swap one silent failure for another. The toast above already told the user what happened.
+      return;
     }
     const link = document.createElement('a');
     link.download = filename;
