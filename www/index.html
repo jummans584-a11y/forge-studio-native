@@ -174,6 +174,11 @@
     left: 10px; top: 92px; flex-direction: row;
     transition: transform 0.2s ease;
   }
+  #charSculptBar {
+    left: 10px; top: 92px; flex-direction: row;
+    transition: transform 0.2s ease;
+  }
+  #charSculptBar button[data-csize] { font-size: 11px; font-weight: 600; }
   /* Collapse handle — one seamless piece with the bar itself (no separate floating element, no
      gap): just a slim tab inside the same rounded pill, set off from the buttons by a hairline
      divider instead of its own background/border/radius. Bar + handle always move together. */
@@ -188,6 +193,7 @@
      hidden and only half of the 20px handle tab still pokes past the screen edge — enough to grab,
      not enough to sit there looking like a whole extra block. */
   #vpLeftBar.collapsed { transform: translateX(-64px); }
+  #charSculptBar.collapsed { transform: translateX(-64px); }
   #gizmoBar.collapsed { transform: translateY(-50%) translateX(64px); }
 
   #empty-state {
@@ -1198,6 +1204,7 @@
       <button data-mode="rotate" title="Rotate">⟳</button>
       <button data-mode="scale" title="Scale">⤢</button>
       <button id="gizmoGroundLockBtn" title="Ground lock — keeps this object snapped to the terrain surface as you move it">⚓</button>
+      <button id="gizmoRemoveBtn" title="Remove the selected added item" style="display:none;color:#e2574c;">🗑</button>
       <button id="gizmoFocusBtn" title="Focus selected">🎯</button>
     </div>
   </div>
@@ -1210,6 +1217,24 @@
       <button data-cam="zoom" title="Zoom">🔍</button>
     </div>
     <div id="vpLeftBarHandle" class="vp-bar-handle" title="Hide/show camera tools">‹</div>
+  </div>
+
+  <!-- Character body-sculpt panel — same floating-pill pattern as #vpLeftBar (Terrain/Map's left
+       camera bar), but for the Character workspace: brush mode buttons (Raise/Lower/Smooth) plus a
+       row of preset brush sizes, mirroring how the Terrain Mountain tool offers a range of sizes. -->
+  <div id="charSculptBar" class="vp-float-bar">
+    <div class="vp-bar-buttons">
+      <button data-csculpt="orbit" class="active" title="Orbit (sculpt off)">🔄</button>
+      <button data-csculpt="sculptRaise" title="Raise — push the surface out">🔺</button>
+      <button data-csculpt="sculptLower" title="Lower — push the surface in">🔻</button>
+      <button data-csculpt="sculptSmooth" title="Smooth">🌊</button>
+      <div style="height:1px;background:var(--line);margin:2px 4px;"></div>
+      <button data-csize="S" title="Brush size: small">S</button>
+      <button data-csize="M" class="active" title="Brush size: medium">M</button>
+      <button data-csize="L" title="Brush size: large">L</button>
+      <button data-csize="XL" title="Brush size: extra large">XL</button>
+    </div>
+    <div id="charSculptBarHandle" class="vp-bar-handle" title="Hide/show sculpt tools">‹</div>
   </div>
 
   <div id="empty-state">
@@ -1295,16 +1320,18 @@
        Character A's <input>/its in-flight selection (sharing one <input> would mean whichever import
        was mid-pick last "owns" the element's onchange target). -->
   <input type="file" id="file-input-fbx-b" accept=".fbx,.glb,.gltf,.obj" multiple />
-  <input type="file" id="file-input-image" accept="image/*" />
+  <input type="file" id="file-input-image" accept="image/*" multiple />
   <input type="file" id="file-input-anims" accept=".fbx,.glb,.gltf,.obj" multiple />
   <input type="file" id="file-input-heightmap" accept="image/*" />
   <input type="file" id="file-input-groundtex" accept="image/*" />
-  <input type="file" id="file-input-brushtex" accept="image/*" />
+  <input type="file" id="file-input-brushtex" accept="image/*" multiple />
+  <input type="file" id="file-input-groundslot-bulk" accept="image/*" multiple />
   <input type="file" id="file-input-terrain-model" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
   <input type="file" id="file-input-replace" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
   <input type="file" id="file-input-place-on-cube" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
   <input type="file" id="file-input-project" accept=".json,application/json" />
   <input type="file" id="file-input-library-add" accept=".fbx,.glb,.gltf,.obj" multiple />
+  <input type="file" id="file-input-outfit" accept=".fbx,.glb,.gltf" multiple />
 </div>
 
 <!-- Vendor libs: loaded from jsDelivr CDN, pinned to three.js r128 to match this app's code.
@@ -1349,11 +1376,13 @@
   const fileInputHeightmap = document.getElementById('file-input-heightmap');
   const fileInputGroundtex = document.getElementById('file-input-groundtex');
   const fileInputBrushtex = document.getElementById('file-input-brushtex');
+  const fileInputGroundSlotBulk = document.getElementById('file-input-groundslot-bulk');
   const fileInputTerrainModel = document.getElementById('file-input-terrain-model');
   const fileInputReplace = document.getElementById('file-input-replace');
   const fileInputPlaceOnCube = document.getElementById('file-input-place-on-cube');
   const fileInputProject = document.getElementById('file-input-project');
   const fileInputLibraryAdd = document.getElementById('file-input-library-add');
+  const fileInputOutfit = document.getElementById('file-input-outfit');
   // BUGFIX: uploading a model worked once, then subsequent taps on "Import FBX/GLB" (or any other
   // upload button) silently did nothing — the file picker sheet either didn't reopen or reopened but
   // its selection stopped firing 'change'. Cause: some Android WebViews (which is exactly what an
@@ -2040,6 +2069,15 @@
             if (positionChanged) { applyGroundBlendSnapshot(oldGroundBlend, false); applyGroundBlendSnapshot(newGroundBlend, true); entry.groundBlendSnapshot = newGroundBlend; }
           },
         });
+      } else if (workspace === 'character' && (!before.position.equals(after.position) || !before.rotation.equals(after.rotation) || !before.scale.equals(after.scale))) {
+        // Character workspace: outfit pieces / body pieces aren't in mapObjects, so they'd
+        // otherwise be draggable via the gizmo but NOT undoable — push a plain transform entry onto
+        // the same global objHistory stack directly instead, using the object itself.
+        pushObjHistory({
+          label: 'transform ' + (obj.name || 'character piece'),
+          undo: () => applyTransform(obj, before),
+          redo: () => applyTransform(obj, after),
+        });
       }
     }
   });
@@ -2064,11 +2102,33 @@
   // out until something selectable is attached, so the hero viewport controls don't jump in and out.
   // Called from refreshUI() so it stays correct after every selection/tool/workspace change.
   function updateGizmoAttachment() {
+    // Terrain/Map: the panel drives whatever's selected in mapObjects via the Select camera tool.
+    // Character: the same panel drives whichever characterOutfitItems entry was added last (or
+    // tapped in the Outfit tab's list) — its own, simpler selection model since there's no
+    // multi-select or click-to-pick-in-viewport for attached items, just "the one thing you just
+    // added or chose from the list".
+    const isTerrain = workspace === 'terrain' && terrainRoot !== null;
+    const isCharacter = workspace === 'character' && charRoot !== null;
+    const barsRelevant = isTerrain || isCharacter;
+
     const objs = (typeof selectedObjects === 'function') ? selectedObjects() : [];
-    const barsRelevant = workspace === 'terrain' && terrainRoot !== null;
-    const wantGizmo = barsRelevant && terrainMode === 'select' && objs.length === 1 && !objs[0].locked;
-    if (wantGizmo) {
-      if (gizmo.object !== objs[0].mesh) gizmo.attach(objs[0].mesh);
+    const outfitEntry = isCharacter ? (characterOutfitItems.find(o => o.id === selectedOutfitId) || null) : null;
+
+    const wantTerrainGizmo = isTerrain && terrainMode === 'select' && objs.length === 1 && !objs[0].locked;
+    const wantCharGizmo = isCharacter && charMode === 'orbit' && (!!outfitEntry || (!!selectedBodyMesh && selectedBodyMesh.parent));
+    const wantGizmo = wantTerrainGizmo || wantCharGizmo;
+    // A sub-mesh pick (Objects tab, expanded item) takes priority over the whole-item target, as
+    // long as it's still actually attached somewhere in the scene (not deleted since selection).
+    // A selected body piece (no outfitEntry at all) drives the gizmo directly.
+    const charTarget = wantCharGizmo
+      ? (outfitEntry
+          ? ((selectedOutfitMesh && selectedOutfitMesh.parent) ? selectedOutfitMesh : outfitEntry.object)
+          : selectedBodyMesh)
+      : null;
+    const gizmoTarget = wantTerrainGizmo ? objs[0].mesh : charTarget;
+
+    if (wantGizmo && gizmoTarget) {
+      if (gizmo.object !== gizmoTarget) gizmo.attach(gizmoTarget);
     } else if (gizmo.object) {
       gizmo.detach();
     }
@@ -2077,19 +2137,42 @@
       gizmoBar.querySelectorAll('button[data-mode]').forEach(b => b.disabled = !wantGizmo);
       const focusBtn = document.getElementById('gizmoFocusBtn');
       if (focusBtn) focusBtn.disabled = !wantGizmo;
+      // Ground lock only makes sense for something sitting on terrain — hidden entirely in the
+      // Character workspace instead of just greyed out, since it never applies there.
       const groundLockBtn = document.getElementById('gizmoGroundLockBtn');
       if (groundLockBtn) {
-        groundLockBtn.disabled = !wantGizmo;
-        groundLockBtn.classList.toggle('active', wantGizmo && !!objs[0].groundLocked);
+        groundLockBtn.style.display = isCharacter ? 'none' : '';
+        groundLockBtn.disabled = !wantTerrainGizmo;
+        groundLockBtn.classList.toggle('active', wantTerrainGizmo && !!objs[0].groundLocked);
+      }
+      // Remove is the Character-side equivalent — the quick way to take back off whatever's
+      // currently selected, right from the same panel you added it from. Hidden in Terrain/Map,
+      // which already has its own delete flow in the Objects list.
+      const removeBtn = document.getElementById('gizmoRemoveBtn');
+      if (removeBtn) {
+        removeBtn.style.display = isCharacter ? '' : 'none';
+        // Only ever removes an added outfitItem — never one of Character A's own original body
+        // pieces, so it stays disabled when a body piece (no outfitEntry) is what's selected.
+        removeBtn.disabled = !wantCharGizmo || !outfitEntry;
       }
     }
     if (gizmoBarHandle) gizmoBarHandle.classList.toggle('show', barsRelevant);
+    // The left camera bar (Select/Pan/Orbit/Zoom) stays Terrain/Map-only — Character has no
+    // separate "select tool", so it would just sit there doing nothing.
     if (vpLeftBar) {
-      vpLeftBar.classList.toggle('show', barsRelevant);
+      vpLeftBar.classList.toggle('show', isTerrain);
       const activeCam = ['pan', 'zoom'].includes(terrainMode) ? terrainMode : (terrainMode === 'select' ? 'select' : 'orbit');
       vpLeftBar.querySelectorAll('button[data-cam]').forEach(b => b.classList.toggle('active', b.dataset.cam === activeCam));
     }
-    if (vpLeftBarHandle) vpLeftBarHandle.classList.toggle('show', barsRelevant);
+    if (vpLeftBarHandle) vpLeftBarHandle.classList.toggle('show', isTerrain);
+    // Character body-sculpt bar — mirrors vpLeftBar's own show/hide, just for Character instead of
+    // Terrain/Map, and syncs its active button to charMode (orbit / sculptRaise / sculptLower /
+    // sculptSmooth) instead of a camera gesture.
+    if (charSculptBar) {
+      charSculptBar.classList.toggle('show', isCharacter);
+      charSculptBar.querySelectorAll('button[data-csculpt]').forEach(b => b.classList.toggle('active', b.dataset.csculpt === charMode));
+    }
+    if (charSculptBarHandle) charSculptBarHandle.classList.toggle('show', isCharacter);
   }
 
   function applyRendererSize() {
@@ -2163,7 +2246,36 @@
     };
   });
 
+  // ---------- Character body-sculpt panel (left side, Character workspace only) — same floating
+  // pill + collapse-handle pattern as vpLeftBar above, but drives charMode's sculpt modes and a
+  // brush-size preset instead of camera gestures. ----------
+  const charSculptBar = document.getElementById('charSculptBar');
+  const charSculptBarHandle = document.getElementById('charSculptBarHandle');
+  let charSculptBarCollapsed = false;
+  try { charSculptBarCollapsed = localStorage.getItem('charSculptBarCollapsed') === '1'; } catch (e) {}
+  applyBarCollapsed(charSculptBar, charSculptBarHandle, 'charSculptBarCollapsed', charSculptBarCollapsed, '›', '‹');
+  if (charSculptBarHandle) charSculptBarHandle.onclick = () => {
+    charSculptBarCollapsed = !charSculptBarCollapsed;
+    applyBarCollapsed(charSculptBar, charSculptBarHandle, 'charSculptBarCollapsed', charSculptBarCollapsed, '›', '‹');
+  };
+  if (charSculptBar) charSculptBar.querySelectorAll('button[data-csculpt]').forEach(btn => {
+    btn.onclick = () => setCharMode(btn.dataset.csculpt);
+  });
+  if (charSculptBar) charSculptBar.querySelectorAll('button[data-csize]').forEach(btn => {
+    btn.onclick = () => {
+      charSculptBrushRadius = CHAR_SCULPT_SIZES[btn.dataset.csize];
+      charSculptBar.querySelectorAll('button[data-csize]').forEach(b => b.classList.toggle('active', b === btn));
+    };
+  });
+
   document.getElementById('gizmoFocusBtn').onclick = () => {
+    if (workspace === 'character') {
+      const entry = characterOutfitItems.find(o => o.id === selectedOutfitId);
+      if (entry) { fitCameraToObject(entry.object, 2.2); return; }
+      if (selectedBodyMesh && selectedBodyMesh.parent) { fitCameraToObject(selectedBodyMesh, 2.2); return; }
+      toast('Select an added item or body piece first, then Focus frames it.', 1800);
+      return;
+    }
     const sel = (typeof selectedObjects === 'function') ? selectedObjects() : [];
     if (!sel.length) { toast('Select an object first, then Focus frames it.', 1800); return; }
     fitCameraToObject(sel[0].mesh, 2.2);
@@ -2175,6 +2287,7 @@
   // floating or sinking. Snaps it once immediately on enable too, so turning it on already fixes a
   // currently-floating/buried object.
   document.getElementById('gizmoGroundLockBtn').onclick = () => {
+    if (workspace !== 'terrain') return; // hidden in Character anyway, but guard in case
     const sel = selectedObjects();
     if (sel.length !== 1) { toast('Select a single object first.', 1800); return; }
     const entry = sel[0];
@@ -2184,10 +2297,52 @@
     refreshUI();
   };
 
+  // 🗑 Remove — Character-only. Takes back off whatever the panel currently has selected, right
+  // from the 3D view, same place it was added from.
+  const gizmoRemoveBtn = document.getElementById('gizmoRemoveBtn');
+  if (gizmoRemoveBtn) gizmoRemoveBtn.onclick = () => {
+    if (workspace !== 'character') return;
+    const entry = characterOutfitItems.find(o => o.id === selectedOutfitId);
+    if (!entry) { toast('Select an added item first.', 1800); return; }
+    selectedOutfitId = null;
+    removeOutfitItem(entry.id); // disposes the mesh, splices it out, rebuilds the dock, and toasts
+    refreshUI();
+  };
+
   // ＋ Add — opens the same Asset Library picker used elsewhere, then drops the chosen model at the
   // current orbit target (roughly the middle of the view) and selects it so Move/Rotate/Scale are
   // immediately usable on it.
   if (gizmoAddBtn) gizmoAddBtn.onclick = () => {
+    if (workspace === 'character') {
+      if (!charRoot) { toast('Import Character A first, then add hair/clothes/accessories.', 1800); return; }
+      openAssetPicker((rec, variant, partName, preloadedObj) => {
+        const placeName = rec.name + (partName ? ' — ' + partName : '');
+        const useObj = (obj) => {
+          let hasMesh = false;
+          obj.traverse(o => { if (o.isMesh) hasMesh = true; });
+          if (!hasMesh) { hideLoading(); toast('That saved model has no mesh to attach.', 2400); return; }
+          // Land it in the middle of the current view first — same spot Map/Terrain's ＋ Add
+          // drops things — THEN attach it onto Character A; attach() below preserves whatever
+          // world position/rotation/scale it already has, so this is where it ends up.
+          obj.position.copy(controls.target);
+          const beforeCount = characterOutfitItems.length;
+          attachOutfitItem(obj, placeName); // handles bone-matched skinning + static fallback, pushes into characterOutfitItems, rebuilds the dock, toasts
+          const added = characterOutfitItems.slice(beforeCount);
+          if (added.length) {
+            const primary = added.find(a => a.kind === 'static') || added[0];
+            selectedOutfitId = primary.id; // so Move/Rotate/Scale on this same panel are live on it immediately
+            selectedBodyMesh = null;
+          }
+          hideLoading();
+          refreshUI();
+          scheduleTextureRepair(obj, () => {});
+        };
+        if (preloadedObj) { useObj(preloadedObj); return; }
+        showLoading(variant === 'optimized' ? 'Optimizing model…' : 'Loading model…');
+        getLibraryAssetInstance(rec, variant || 'original', useObj);
+      });
+      return;
+    }
     if (workspace !== 'terrain' || !terrainRoot) { toast('Start or open a map first.', 1800); return; }
     openAssetPicker((rec, variant, partName, preloadedObj) => {
       const placeName = rec.name + (partName ? ' — ' + partName : '');
@@ -2250,7 +2405,7 @@
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         mats.forEach(m => {
           if (!m) return;
-          ['map','normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','alphaMap','bumpMap','displacementMap','envMap'].forEach(key => {
+          ['map','normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','alphaMap','bumpMap','displacementMap','lightMap','envMap'].forEach(key => {
             if (m[key]) m[key].needsUpdate = true;
           });
           m.needsUpdate = true;
@@ -2579,7 +2734,7 @@
   // warn well before the hard failure rather than promise an exact number.
   function estimateTexturePressure(root) {
     const texSeen = new Set(), matSeen = new Set();
-    const mapSlots = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'bumpMap', 'alphaMap', 'displacementMap'];
+    const mapSlots = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'bumpMap', 'alphaMap', 'displacementMap', 'lightMap'];
     let estBytes = 0;
     root.traverse(o => {
       if (!o.isMesh || !o.material) return;
@@ -2890,6 +3045,25 @@
   // CHARACTER WORKSPACE
   // ============================================================
   let charRoot = null;
+  // OUTFIT / INVENTORY — extra clothing/hair/accessory pieces attached onto Character A after the
+  // base character is loaded (see attachOutfitItem). Each entry: { id, name, object, kind: 'skinned'
+  // | 'static', boneName }. These objects live as real children inside charRoot's hierarchy (so they
+  // export, animate and paint-highlight — well, export at least — exactly like any other part of the
+  // character), this array just remembers which children were added this way so the Outfit tab can
+  // list/remove them specifically instead of only showing the parts the base file came with.
+  let characterOutfitItems = [];
+  // Which characterOutfitItems entry (if any) the right-side ＋ / Move / Rotate / Scale panel is
+  // currently driving with the gizmo — set when an item is added from the Library, or tapped in
+  // the Objects tab's list below. selectedOutfitMesh optionally narrows that down to one specific
+  // piece inside the item (tapped in the Objects tab's expanded per-mesh list) — when set, the
+  // gizmo grabs that one mesh instead of the whole item.
+  let selectedOutfitId = null;
+  let selectedOutfitMesh = null;
+  // A tap on one of Character A's own imported body pieces (Objects tab's "Character body" list) —
+  // separate from selectedOutfitId/selectedOutfitMesh (which are only for items added via ＋ from the
+  // Asset Library), since a body piece has no characterOutfitItems entry to look up. Lets the same
+  // Move/Rotate/Scale panel drive an original body mesh too, without allowing it to be Removed.
+  let selectedBodyMesh = null;
   // PHASE 2 — CHARACTER A / CHARACTER B
   // Character B is a fully independent second slot: its own root object, its own filename, loaded
   // and cleared without ever touching charRoot (Character A). It has no paint canvases and no
@@ -3404,6 +3578,10 @@
 
   let paintMeshes = []; // { mesh, ctx, canvasEl, texture, undoStack }
   let charMode = 'orbit';
+  const CHAR_SCULPT_MODES = ['sculptRaise', 'sculptLower', 'sculptSmooth'];
+  const CHAR_SCULPT_SIZES = { S: 0.06, M: 0.12, L: 0.22, XL: 0.35 }; // world units — character models run roughly 1.7-2 units tall, so these read as fingertip/palm/forearm/torso-sized brushes
+  let charSculptBrushRadius = CHAR_SCULPT_SIZES.M;
+  let charSculptStrength = 0.05; // displacement per stamp, scaled by falloff + the mesh's own world scale
   function setCharMode(newMode) {
     if (newMode !== charMode) deactivateAllTools(); // same centralized teardown as the terrain/map tools
     charMode = newMode;
@@ -3591,6 +3769,8 @@
     mixer = null;
     charARestQuats = new Map();
     characterAnimations = [];
+    characterOutfitItems = [];
+    selectedOutfitId = null; selectedOutfitMesh = null; selectedBodyMesh = null;
     playingIndex = -1;
     currentAction = null;
     animPreviewPlaying = false;
@@ -3644,6 +3824,143 @@
     // for good, exactly once, the moment a model actually lands. The Map/Terrain side already had
     // its own equivalent call, which is why only Character showed this.
     refreshUI();
+  }
+
+  // ============================================================
+  // OUTFIT / INVENTORY — attach an extra clothing/hair/accessory item onto the already-loaded
+  // Character A, and let each part of A (its original meshes AND anything attached here) be hidden
+  // or fully removed. Two attachment strategies depending on what the imported file contains:
+  //   1) SKINNED pieces (the item has its own skeleton — a dress/shirt/hair-with-bones exported
+  //      from the same base body/rig) — the skin weights are kept exactly as authored, only the
+  //      Bone objects its skinIndices point at are swapped for Character A's own bones, matched by
+  //      name with the same Mixamo/UE/Unity/VRM/... matcher already used for animation retargeting
+  //      above (buildRetargetBoneMap). This is what makes the new piece deform with Character A's
+  //      own animations instead of bringing (and being stuck in) its own rest pose. Works best when
+  //      the item's rest pose roughly matches Character A's (same base body/rig family) — the match
+  //      ratio is reported so a bad fit is obvious rather than silently distorted.
+  //   2) Whatever ISN'T a skinned mesh (props, rigid hair, glasses — no bones of its own) is kept in
+  //      its original internal hierarchy and attached as one unit directly under charRoot, in its own
+  //      authored position — simplest and most predictable for a rigid prop, though it won't itself
+  //      follow bone animation the way a skinned piece does.
+  // Either way the result becomes real children inside charRoot's own hierarchy, so it exports
+  // exactly like everything else under charRoot already does (visible meshes only — see exportGLB).
+  // ============================================================
+  function attachOutfitItem(obj, label) {
+    if (!charRoot) { toast('Load a character first, then add clothing/accessories.', 2400); return; }
+    obj.updateMatrixWorld(true);
+    try { stripEmbeddedLights(obj); } catch (e) {}
+    try { forceDoubleSided(obj); } catch (e) {}
+
+    const skinned = [];
+    obj.traverse(o => { if (o.isSkinnedMesh) skinned.push(o); });
+    let meshTotal = 0;
+    obj.traverse(o => { if (o.isMesh) meshTotal++; });
+    if (!meshTotal) { toast('"' + label + '" has no mesh to attach.', 2400); return; }
+
+    const targetBones = collectBones(charRoot);
+    const targetByName = new Map();
+    targetBones.forEach(b => targetByName.set(b.name, b));
+
+    let attachedSkinned = 0, skippedSkinned = 0;
+    let matchStats = { matched: 0, total: 0 };
+
+    if (skinned.length && targetBones.length) {
+      const sourceBones = collectBones(obj);
+      const built = buildRetargetBoneMap(sourceBones, targetBones);
+      matchStats = { matched: built.matched, total: built.total };
+      skinned.forEach(mesh => {
+        const oldBones = mesh.skeleton.bones;
+        const newBones = oldBones.map(b => {
+          const mappedName = built.map.get(b.name);
+          return mappedName ? targetByName.get(mappedName) : null;
+        });
+        if (newBones.some(b => !b)) { skippedSkinned++; return; } // this piece's rig didn't match well enough — leave it out rather than distort it
+        const newSkeleton = new THREE.Skeleton(newBones, mesh.skeleton.boneInverses);
+        mesh.bind(newSkeleton, mesh.bindMatrix);
+        mesh.skinning = true;
+        charRoot.attach(mesh); // reparents + auto-removes mesh from obj, preserving its world transform
+        attachedSkinned++;
+        characterOutfitItems.push({ id: 'outfit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), name: mesh.name || label, object: mesh, kind: 'skinned' });
+      });
+    }
+
+    // Whatever's left in obj (unskinned meshes, or every mesh if the file had no skeleton at all,
+    // or skinned pieces that were skipped above for a poor bone match) — attach as one static unit.
+    let attachedStatic = false;
+    if (obj.children.length || (obj.isMesh && obj.parent == null)) {
+      obj.name = obj.name || label;
+      charRoot.attach(obj);
+      attachedStatic = true;
+      characterOutfitItems.push({ id: 'outfit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), name: label, object: obj, kind: 'static' });
+    }
+
+    if (!attachedSkinned && !attachedStatic) {
+      toast('Couldn\'t attach "' + label + '" — its skeleton didn\'t match Character A\'s bones closely enough. Try a clothing item exported from the same base body.', 4600);
+      return;
+    }
+
+    buildCharacterDock();
+    const parts = [];
+    if (attachedSkinned) parts.push(attachedSkinned + ' skinned part(s) bound to Character A\'s skeleton');
+    if (attachedStatic) parts.push('1 static part attached');
+    let msg = '"' + label + '" attached — ' + parts.join(', ') + '.';
+    if (matchStats.total) {
+      const pct = Math.round((matchStats.matched / matchStats.total) * 100);
+      msg += ' Bone match: ' + matchStats.matched + '/' + matchStats.total + ' (' + pct + '%).' + (pct < 50 ? ' Low match — double-check it looks right.' : '');
+    }
+    if (skippedSkinned) msg += ' ' + skippedSkinned + ' piece(s) skipped (bone match too low).';
+    toast(msg, 5200);
+  }
+
+  function removeOutfitItem(id) {
+    const idx = characterOutfitItems.findIndex(o => o.id === id);
+    if (idx === -1) return;
+    const entry = characterOutfitItems[idx];
+    const parent = entry.object.parent;
+    // Detach but don't dispose the geometry — same non-destructive pattern as deleteMapObjects,
+    // so this can actually be undone (↶ top bar) instead of being gone for good the instant it's tapped.
+    if (parent) parent.remove(entry.object);
+    characterOutfitItems.splice(idx, 1);
+    if (selectedOutfitId === entry.id) selectedOutfitId = null;
+    if (selectedOutfitMesh === entry.object) selectedOutfitMesh = null;
+    pushObjHistory({
+      label: 'remove ' + entry.name,
+      undo: () => { if (parent) parent.add(entry.object); if (!characterOutfitItems.includes(entry)) characterOutfitItems.splice(idx, 0, entry); buildCharacterDock(); requestRender(); },
+      redo: () => {
+        const i2 = characterOutfitItems.findIndex(o => o.id === entry.id);
+        if (i2 !== -1) characterOutfitItems.splice(i2, 1);
+        if (entry.object.parent) entry.object.parent.remove(entry.object);
+        if (selectedOutfitId === entry.id) selectedOutfitId = null;
+        buildCharacterDock(); requestRender();
+      },
+    });
+    buildCharacterDock();
+    toast('Removed "' + entry.name + '" — Undo (↶ top bar) brings it back.', 2400);
+  }
+
+  function loadOutfitFile(file, allFiles) {
+    if (!charRoot) { toast('Load a character first, then add clothing/accessories.', 2400); return; }
+    showLoading('Reading ' + file.name + '…');
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const { manager, revoke } = createSiblingTextureManager(allFiles || [file], file);
+    const reader = new FileReader();
+    reader.onprogress = (e) => { if (e.lengthComputable) setLoadingProgress((e.loaded / e.total) * 100); };
+    reader.onerror = () => showLoadError('Could not read that file.', String(reader.error || ''));
+    reader.onload = () => {
+      loadingText.textContent = 'Parsing model…';
+      setTimeout(() => {
+        parseModelBuffer(ext, reader.result, manager, (obj) => {
+          try { attachOutfitItem(obj, file.name); }
+          catch (err) { console.error(err); showLoadError('Loaded but failed to attach onto the character.', (err && (err.message || String(err))) || ''); }
+          finally { hideLoading(); setTimeout(revoke, 4000); }
+        }, (err) => {
+          console.error(err);
+          hideLoading(); revoke();
+          showLoadError('This file failed to parse in-browser.', (err && (err.message || String(err))) || '');
+        });
+      }, 30);
+    };
+    reader.readAsArrayBuffer(file);
   }
 
   // ============================================================
@@ -5176,7 +5493,7 @@
           showLoadError(
             'This model failed to parse in-browser.',
             (err && (err.message || String(err))) +
-            '\n\nMobile browsers have limited memory. A dense mesh with embedded textures around 80–90MB often exceeds it.\n\nTry: in Blender, re-export with textures NOT embedded (uncheck "Embed Textures"), or Decimate the mesh, then re-export smaller. GLB usually loads more reliably than FBX on mobile. Or use "Load base texture image" instead and paint on the demo shape / a lighter model.'
+            '\n\nMobile browsers have limited memory. A dense mesh with embedded textures around 80–90MB often exceeds it.\n\nTry: in Blender, re-export with textures NOT embedded (uncheck "Embed Textures"), or Decimate the mesh, then re-export smaller. GLB usually loads more reliably than FBX on mobile. Or use "Load texture(s)…" instead and paint on the demo shape / a lighter model.'
           );
         });
       }, 30);
@@ -5184,24 +5501,97 @@
     reader.readAsArrayBuffer(file);
   }
 
-  function loadImageAsBaseTexture(file) {
+  // Accepts one OR MANY texture files at once — same multi-select + auto-classify-by-filename idea
+  // as the Material panel's "Upload texture file(s)…" (assignTextureToSelected), reusing the exact
+  // same TEXTURE_SLOT_RULES/classifyTextureSlot so a file named e.g. "*_normal.png" is recognized
+  // identically in both places. Only Base Color actually gets PAINTED onto the live paint canvas —
+  // that's the one channel brush strokes blend into and the one thing "paint" can mean here.
+  // Everything else recognized (Normal, Roughness, Metalness, AO, Emissive, Alpha, Height/Bump,
+  // Displacement, Light Map) is a static PBR map, not something a 2D brush paints onto, so it's
+  // assigned straight onto each paintable mesh's material — upgrading it to MeshStandardMaterial
+  // first if it doesn't support the slot yet. Reports back exactly what landed where, same as the
+  // Material panel's toast, so "texture ke saath-saath kya-kya load hua" is always visible.
+  function loadPaintTextureSet(files) {
     if (!paintMeshes.length) { toast('Load a model first (or try the demo shape).', 2200); return; }
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const captured = paintMeshes.map(entry => ({ entry, before: entry.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE) }));
-      paintMeshes.forEach(entry => {
-        entry.ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
-        entry.ctx.drawImage(img, 0, 0, TEX_SIZE, TEX_SIZE);
-        entry.texture.needsUpdate = true;
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    (async () => {
+      const usedSlots = new Set();
+      const assignments = []; // { slot, tex, name }
+      const skipped = [];
+      for (const f of list) {
+        const guess = classifyTextureSlot(f.name);
+        let slot = guess ? guess.slot : null;
+        const srgb = guess ? guess.srgb : true;
+        if (!slot) {
+          if (!usedSlots.has('map')) slot = 'map';
+          else { skipped.push(f.name); continue; }
+        }
+        if (usedSlots.has(slot)) { skipped.push(f.name); continue; }
+        try {
+          const tex = await loadImageAsTexture(f, srgb);
+          assignments.push({ slot, tex, name: f.name });
+          usedSlots.add(slot);
+        } catch (err) { skipped.push(f.name); }
+      }
+      if (!assignments.length) { toast('Could not recognize any of those images as textures.', 2400); return; }
+
+      const baseColor = assignments.find(a => a.slot === 'map');
+      const materialSlots = assignments.filter(a => a.slot !== 'map');
+      const needsStandard = materialSlots.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
+
+      // --- Base Color: painted straight into the canvas every paintMeshes entry already owns ---
+      let canvasBefore = null, canvasAfter = null;
+      if (baseColor) {
+        canvasBefore = paintMeshes.map(entry => ({ entry, before: entry.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE) }));
+        paintMeshes.forEach(entry => {
+          entry.ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
+          entry.ctx.drawImage(baseColor.tex.image, 0, 0, TEX_SIZE, TEX_SIZE);
+          entry.texture.needsUpdate = true;
+        });
+        canvasAfter = canvasBefore.map(c => ({ entry: c.entry, after: c.entry.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE) }));
+      }
+
+      // --- Everything else: assigned straight onto each mesh's material ---
+      let upgraded = 0;
+      const matBefore = [];
+      if (materialSlots.length) {
+        paintMeshes.forEach(entry => {
+          if (needsStandard) { const prevMat = firstMaterialOf(entry.mesh); const newMat = ensureStandardMaterial(entry.mesh); if (newMat !== prevMat) upgraded++; }
+          const mat = firstMaterialOf(entry.mesh);
+          if (!mat) return;
+          matBefore.push({ mesh: entry.mesh, wasMat: mat });
+          materialSlots.forEach(a => { mat[a.slot] = a.tex; });
+          mat.needsUpdate = true;
+        });
+      }
+      const matAfter = matBefore.map(b => ({ mesh: b.mesh, mat: firstMaterialOf(b.mesh) }));
+
+      pushObjHistory({
+        label: 'load texture set (' + assignments.length + ')',
+        undo: () => {
+          if (canvasBefore) canvasBefore.forEach(c => { c.entry.ctx.putImageData(c.before, 0, 0); c.entry.texture.needsUpdate = true; c.entry.layers = []; c.entry.activeLayerId = null; });
+          matBefore.forEach(b => { if (Array.isArray(b.mesh.material)) b.mesh.material[0] = b.wasMat; else b.mesh.material = b.wasMat; b.wasMat.needsUpdate = true; });
+        },
+        redo: () => {
+          if (canvasAfter) canvasAfter.forEach(c => { c.entry.ctx.putImageData(c.after, 0, 0); c.entry.texture.needsUpdate = true; c.entry.layers = []; c.entry.activeLayerId = null; });
+          matAfter.forEach(a => {
+            if (Array.isArray(a.mesh.material)) a.mesh.material[0] = a.mat; else a.mesh.material = a.mat;
+            materialSlots.forEach(x => a.mat[x.slot] = x.tex);
+            a.mat.needsUpdate = true;
+          });
+        },
       });
-      pushCanvasHistory('load base texture', captured);
-      URL.revokeObjectURL(url);
-      toast('Base texture applied — paint over it now.', 2200);
-    };
-    img.onerror = () => toast('Could not load that image.', 2000);
-    img.src = url;
+
+      refreshUI();
+      const summary = assignments.map(a => TEXTURE_SLOT_LABEL[a.slot] + (a.slot === 'map' ? ' (painted)' : '')).join(', ');
+      const upgradeNote = upgraded ? (' (upgraded ' + upgraded + ' material' + (upgraded > 1 ? 's' : '') + ' to support it)') : '';
+      toast('Loaded: ' + summary + upgradeNote + (skipped.length ? (' — skipped ' + skipped.length + ' unrecognized file(s)') : ''), 3800);
+    })();
   }
+  // Kept as a thin wrapper — old call sites (and the "model failed to parse" recovery hint) still
+  // reference this name for a single-image load.
+  function loadImageAsBaseTexture(file) { loadPaintTextureSet([file]); }
 
   // ============================================================
   // TERRAIN WORKSPACE
@@ -5898,7 +6288,14 @@
     const byName = new Map();
     Array.from(allFiles || []).forEach(f => {
       if (f === mainFile) return;
-      if (!/^image\//.test(f.type) && !/\.(png|jpe?g|webp|bmp|tga|dds)$/i.test(f.name)) return;
+      // Any sibling file picked alongside the main model can be something a plain (non-binary)
+      // .gltf references by relative filename — most commonly its .bin geometry/animation buffer,
+      // but also .png/.jpg/.webp/etc textures. Previously only image extensions were mapped here,
+      // so a "scene.gltf + scene.bin + textures/" export (very common from Blender/other DCC tools)
+      // would parse the JSON fine but then fail to resolve scene.bin — a format that LOOKED
+      // supported (.gltf is in every accept= list) but silently didn't import. Map every sibling
+      // file by name (except the main model itself) so GLTFLoader's internal fetches for any of
+      // them resolve to the right in-memory blob instead of a real network request.
       byName.set(f.name.toLowerCase(), URL.createObjectURL(f));
     });
     const manager = new THREE.LoadingManager();
@@ -5915,7 +6312,11 @@
   function addFilesToLibrary(files) {
     const all = Array.from(files);
     const list = all.filter(f => /\.(glb|gltf|fbx)$/i.test(f.name));
-    const textureFiles = all.filter(f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|tga|dds)$/i.test(f.name));
+    // Sidecar files a plain .gltf can reference by name — textures AND its .bin buffer (see the
+    // matching note in createSiblingTextureManager). Without the .bin here, a library-saved .gltf
+    // would parse once (this session, while the manager was live) but come back broken/empty after
+    // a reload, since only the .bin's bytes — not a resolvable reference to them — were ever saved.
+    const textureFiles = all.filter(f => /^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|tga|dds|bin)$/i.test(f.name));
     if (!list.length) { toast('Pick .glb, .gltf or .fbx model files.', 2200); return; }
     if (!libraryHasRoomFor(list.length)) { showLibraryLimitPrompt(); return; }
     showLoading('Adding to library…');
@@ -6944,40 +7345,84 @@
       return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
     };
   }
-  // Classic value-noise: a coarse grid of random values, smoothly interpolated up to full size.
-  function _noiseLayer(rng, gridN, outSize) {
-    const gw = Math.max(2, Math.round(gridN)), gh = gw;
-    const grid = new Float32Array(gw * gh);
-    for (let i = 0; i < gw * gh; i++) grid[i] = rng();
-    const out = new Float32Array(outSize * outSize);
-    for (let y = 0; y < outSize; y++) {
-      const fy = (y / outSize) * gh;
-      const y0 = Math.floor(fy) % gh, y1 = (y0 + 1) % gh;
-      let ty = fy - Math.floor(fy); ty = ty * ty * ty * (ty * (ty * 6 - 15) + 10); // smootherstep
-      for (let x = 0; x < outSize; x++) {
-        const fx = (x / outSize) * gw;
-        const x0 = Math.floor(fx) % gw, x1 = (x0 + 1) % gw;
-        let tx = fx - Math.floor(fx); tx = tx * tx * tx * (tx * (tx * 6 - 15) + 10);
-        const v00 = grid[y0 * gw + x0], v10 = grid[y0 * gw + x1], v01 = grid[y1 * gw + x0], v11 = grid[y1 * gw + x1];
-        const a = v00 + (v10 - v00) * tx, b = v01 + (v11 - v01) * tx;
-        out[y * outSize + x] = a + (b - a) * ty;
+  // ---- Gradient (Perlin-style) noise engine ----
+  // Replaces the old coarse-grid value-noise (which smoothly interpolated a handful of random
+  // points and produced soft, blobby, low-detail hills no matter how many octaves were blended).
+  // This is continuous gradient noise like Godot/Unity terrain generators use: every octave adds
+  // real high-frequency structure instead of just re-smoothing the same low-frequency shape, and
+  // it's finished off with domain warping + a ridged detail pass so ridgelines and small bumps
+  // show up instead of everything reading as one big rounded mound.
+  function _buildPerm(seed) {
+    const rng = _mulberry32(seed >>> 0);
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    for (let i = 255; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+    }
+    const perm = new Uint8Array(512);
+    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    return perm;
+  }
+  function _fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  function _glerp(a, b, t) { return a + t * (b - a); }
+  const _GRAD_X = [1, -1, 1, -1, 1, -1, 0, 0];
+  const _GRAD_Y = [1, 1, -1, -1, 0, 0, 1, -1];
+  function _grad(hash, x, y) { const h = hash & 7; return _GRAD_X[h] * x + _GRAD_Y[h] * y; }
+  // Continuous 2D gradient noise, range ~[-1, 1], smooth and tileable-seamless per-lattice-cell.
+  function _perlin2(perm, x, y) {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+    const xf = x - Math.floor(x), yf = y - Math.floor(y);
+    const u = _fade(xf), v = _fade(yf);
+    const aa = perm[perm[X] + Y], ab = perm[perm[X] + Y + 1], ba = perm[perm[X + 1] + Y], bb = perm[perm[X + 1] + Y + 1];
+    const x1 = _glerp(_grad(aa, xf, yf), _grad(ba, xf - 1, yf), u);
+    const x2 = _glerp(_grad(ab, xf, yf - 1), _grad(bb, xf - 1, yf - 1), u);
+    return _glerp(x1, x2, v);
+  }
+  // Standard fractal Brownian motion — the big-picture landform shape.
+  function _fbm2(perm, x, y, octaves) {
+    let amp = 1, freq = 1, sum = 0, maxAmp = 0;
+    for (let o = 0; o < octaves; o++) {
+      sum += _perlin2(perm, x * freq, y * freq) * amp;
+      maxAmp += amp; amp *= 0.5; freq *= 2;
+    }
+    return sum / maxAmp;
+  }
+  // Ridged noise (folded absolute value) — produces sharp ridgelines/creases instead of round
+  // hills, which is most of what makes procedural terrain read as "detailed" rather than "smooth".
+  function _ridged2(perm, x, y, octaves) {
+    let amp = 1, freq = 1, sum = 0, maxAmp = 0;
+    for (let o = 0; o < octaves; o++) {
+      let n = 1 - Math.abs(_perlin2(perm, x * freq, y * freq));
+      n *= n;
+      sum += n * amp; maxAmp += amp; amp *= 0.5; freq *= 2;
+    }
+    return sum / maxAmp; // 0..1
+  }
+  // Blends fbm (landform) + domain warp (breaks up grid-aligned repetition) + ridged detail
+  // (fine bumps/ridges) into one normalized 0..255 grayscale buffer — stands in for an uploaded
+  // heightmap image everywhere downstream, same as before.
+  function _fractalNoiseGrid(seed, size, baseGrid, octaves) {
+    const perm = _buildPerm(seed);
+    const warpPerm = _buildPerm((seed ^ 0x9e3779b9) >>> 0);
+    const scale = Math.max(2, baseGrid);
+    const warpAmt = 0.5; // in grid units — enough to bend contours without losing the Scale slider's meaning
+    const detailOctaves = Math.max(1, octaves);
+    const result = new Float32Array(size * size);
+    let min = Infinity, max = -Infinity;
+    for (let y = 0; y < size; y++) {
+      const ny = (y / size) * scale;
+      for (let x = 0; x < size; x++) {
+        const nx = (x / size) * scale;
+        const wx = _perlin2(warpPerm, nx * 0.5 + 11.3, ny * 0.5 - 4.7) * warpAmt;
+        const wy = _perlin2(warpPerm, nx * 0.5 - 7.9, ny * 0.5 + 19.1) * warpAmt;
+        const base = _fbm2(perm, nx + wx, ny + wy, detailOctaves); // ~[-1,1] landform
+        const ridge = _ridged2(perm, (nx + wx) * 2.1 + 5.2, (ny + wy) * 2.1 - 3.4, Math.max(1, detailOctaves - 1)); // [0,1] fine detail
+        const v = base * 0.72 + (ridge * 2 - 1) * 0.38;
+        result[y * size + x] = v;
+        if (v < min) min = v; if (v > max) max = v;
       }
     }
-    return out;
-  }
-  // Blends several octaves of _noiseLayer (fractal noise) into one normalized 0..255 grayscale
-  // buffer — this buffer stands in for an uploaded heightmap image everywhere downstream.
-  function _fractalNoiseGrid(seed, size, baseGrid, octaves) {
-    const rng = _mulberry32(seed);
-    const result = new Float32Array(size * size);
-    let amp = 1, maxAmp = 0, grid = Math.max(2, Math.round(baseGrid));
-    for (let o = 0; o < octaves; o++) {
-      const layer = _noiseLayer(rng, grid, size);
-      for (let i = 0; i < size * size; i++) result[i] += layer[i] * amp;
-      maxAmp += amp; amp *= 0.5; grid *= 2;
-    }
-    let min = Infinity, max = -Infinity;
-    for (let i = 0; i < size * size; i++) { result[i] /= maxAmp; if (result[i] < min) min = result[i]; if (result[i] > max) max = result[i]; }
     const range = Math.max(1e-6, max - min);
     const out = new Uint8ClampedArray(size * size);
     for (let i = 0; i < size * size; i++) out[i] = Math.round(((result[i] - min) / range) * 255);
@@ -7453,6 +7898,121 @@
   // several passes and sharp sculpted edges relax into more natural-looking slopes and ridgelines.
   // Only runs on the procedural ground grid (same restriction as "Reset to flat") since it needs a
   // regular row/column grid to find neighbors; imported map meshes don't have one.
+  // ---------- Character body sculpt (Raise/Lower/Smooth) ----------
+  // Same broad-phase-culled, per-mesh local-space approach as sculptCustomAt above, but displaces
+  // each vertex along its OWN NORMAL instead of only Y — an imported character is a full 3D organic
+  // shape (arms, head, etc.), not a heightfield, so a height-only brush would do the wrong thing on
+  // anything that isn't lying flat. Raise pushes outward along the normal, Lower pushes inward,
+  // Smooth pulls in-range vertices toward the local average (cheap Laplacian-style relax).
+  const _charSculptInvMat = new THREE.Matrix4();
+  const _charSculptLocalPoint = new THREE.Vector3();
+  const _charSculptWorldCenter = new THREE.Vector3();
+  function raycastCharacterBody() {
+    if (!charRoot) return null;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(charRoot, true);
+    return hits.length ? hits[0] : null;
+  }
+  function sculptCharacterAt(worldPoint, mode) {
+    if (!charRoot) return;
+    charRoot.updateMatrixWorld(true);
+    const r = charSculptBrushRadius;
+    charRoot.traverse(o => {
+      if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      if (!o.geometry.boundingSphere) return;
+      const worldScale = o.matrixWorld.getMaxScaleOnAxis() || 0.0001;
+      const worldRadius = o.geometry.boundingSphere.radius * worldScale;
+      _charSculptWorldCenter.copy(o.geometry.boundingSphere.center).applyMatrix4(o.matrixWorld);
+      if (_charSculptWorldCenter.distanceTo(worldPoint) > worldRadius + r) return; // out of brush reach
+
+      _charSculptInvMat.copy(o.matrixWorld).invert();
+      _charSculptLocalPoint.copy(worldPoint).applyMatrix4(_charSculptInvMat);
+      const localR = r / worldScale;
+      const localStrength = charSculptStrength / worldScale;
+      const pos = o.geometry.attributes.position;
+      const norm = o.geometry.attributes.normal;
+      let changed = false;
+
+      if (mode === 'sculptSmooth') {
+        let sx = 0, sy = 0, sz = 0, n = 0;
+        for (let i = 0; i < pos.count; i++) {
+          const dx = pos.getX(i) - _charSculptLocalPoint.x, dy = pos.getY(i) - _charSculptLocalPoint.y, dz = pos.getZ(i) - _charSculptLocalPoint.z;
+          if (dx * dx + dy * dy + dz * dz > localR * localR) continue;
+          sx += pos.getX(i); sy += pos.getY(i); sz += pos.getZ(i); n++;
+        }
+        if (n < 2) return;
+        const ax = sx / n, ay = sy / n, az = sz / n;
+        for (let i = 0; i < pos.count; i++) {
+          const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+          const dx = vx - _charSculptLocalPoint.x, dy = vy - _charSculptLocalPoint.y, dz = vz - _charSculptLocalPoint.z;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > localR * localR) continue;
+          const falloff = Math.cos((Math.sqrt(d2) / localR) * Math.PI * 0.5);
+          pos.setX(i, vx + (ax - vx) * 0.35 * falloff);
+          pos.setY(i, vy + (ay - vy) * 0.35 * falloff);
+          pos.setZ(i, vz + (az - vz) * 0.35 * falloff);
+          changed = true;
+        }
+      } else if (norm) {
+        const dir = mode === 'sculptLower' ? -1 : 1;
+        for (let i = 0; i < pos.count; i++) {
+          const vx = pos.getX(i), vy = pos.getY(i), vz = pos.getZ(i);
+          const dx = vx - _charSculptLocalPoint.x, dy = vy - _charSculptLocalPoint.y, dz = vz - _charSculptLocalPoint.z;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > localR * localR) continue;
+          const falloff = Math.cos((Math.sqrt(d2) / localR) * Math.PI * 0.5);
+          pos.setX(i, vx + norm.getX(i) * dir * localStrength * falloff);
+          pos.setY(i, vy + norm.getY(i) * dir * localStrength * falloff);
+          pos.setZ(i, vz + norm.getZ(i) * dir * localStrength * falloff);
+          changed = true;
+        }
+      }
+      if (changed) {
+        pos.needsUpdate = true;
+        o.geometry.computeVertexNormals();
+        o.geometry.computeBoundingSphere();
+      }
+    });
+  }
+  // Undo — same before/after snapshot pattern as terrainSaveUndo/terrainCommitUndo, feeding the
+  // same global objHistory/objRedo stack so one Undo button works everywhere.
+  let _charSculptPendingBefore = null;
+  function snapshotCharacterMesh() {
+    if (!charRoot) return null;
+    const snaps = [];
+    charRoot.traverse(o => { if (o.isMesh && o.geometry && o.geometry.attributes.position) snaps.push({ mesh: o, array: Float32Array.from(o.geometry.attributes.position.array) }); });
+    return snaps;
+  }
+  function restoreCharacterMeshSnapshot(snaps) {
+    if (!snaps) return;
+    snaps.forEach(snap => {
+      if (!snap.mesh.geometry || !snap.mesh.geometry.attributes.position) return;
+      snap.mesh.geometry.attributes.position.array.set(snap.array);
+      snap.mesh.geometry.attributes.position.needsUpdate = true;
+      snap.mesh.geometry.computeVertexNormals();
+      snap.mesh.geometry.computeBoundingSphere();
+    });
+  }
+  function charSculptSaveUndo() { _charSculptPendingBefore = snapshotCharacterMesh(); }
+  function charSculptCommitUndo() {
+    if (!_charSculptPendingBefore) return;
+    const before = _charSculptPendingBefore;
+    _charSculptPendingBefore = null;
+    const after = snapshotCharacterMesh();
+    pushObjHistory({ label: 'character sculpt', undo: () => restoreCharacterMeshSnapshot(before), redo: () => restoreCharacterMeshSnapshot(after) });
+  }
+  let _charSculptStrokeActive = false;
+  let _lastCharSculptWorldPt = null;
+  function handleCharacterSculptAtPointer() {
+    if (!charRoot || !CHAR_SCULPT_MODES.includes(charMode)) return;
+    const hit = raycastCharacterBody();
+    if (!hit) return;
+    if (!_charSculptStrokeActive) { charSculptSaveUndo(); _charSculptStrokeActive = true; }
+    sculptCharacterAt(hit.point, charMode);
+    _lastCharSculptWorldPt = hit.point.clone();
+  }
+
   function simulateErosion(iterations) {
     if (!terrainMesh || terrainIsCustom) { toast('Erosion works on the procedural ground, not an imported map.', 2600); return; }
     terrainSaveUndo();
@@ -7505,6 +8065,7 @@
   let brushSpacing = 0.28;        // 0..1 — minimum gap between dabs along a drag, as a fraction of brush size
   let brushFalloff = 'smooth';    // smooth | linear | hard — shape of the edge fade curve
   let brushTextureImg = null;     // user-loaded image used as the brush stamp when paintTool === 'texture'
+  const brushLoadedSlots = new Set(); // which PBR slots (of TEXTURE_SLOT_LABEL) the last multi-upload recognized, for the dock's status list
   let _brushTexturePattern = null;
   let cloneArmed = false;         // true right after tapping "Set clone source" — next tap sets it
   let cloneSourcePt = null;       // {x,y} in texture space
@@ -7569,6 +8130,16 @@
   // deferred composite instead: see flushPaintComposite(), called once after the dabs are done.
   let _suppressPaintComposite = 0;
   const _pendingPaintComposites = new Set();
+  // Same idea, for surfaces that paint directly onto a canvas/texture without going through the
+  // layer stack (character body paint, below) — a fast swipe still only needs ONE GPU upload per
+  // move event, not one per interpolated dab. flagTextureDirty() is the entry point either kind of
+  // paint call should use; it does the right thing whether or not a stroke batch is in progress.
+  const _pendingTextureFlushes = new Set();
+  function flagTextureDirty(texture) {
+    if (!texture) return;
+    if (_suppressPaintComposite > 0) { _pendingTextureFlushes.add(texture); return; }
+    texture.needsUpdate = true;
+  }
   function compositePaintTarget(target) {
     if (!target || !target.ctx || !target.layers) return;
     if (_suppressPaintComposite > 0) { _pendingPaintComposites.add(target); return; }
@@ -7586,9 +8157,8 @@
     target.texture.needsUpdate = true;
   }
   function flushPaintComposite() {
-    if (!_pendingPaintComposites.size) return;
-    _pendingPaintComposites.forEach(_doCompositePaintTarget);
-    _pendingPaintComposites.clear();
+    if (_pendingPaintComposites.size) { _pendingPaintComposites.forEach(_doCompositePaintTarget); _pendingPaintComposites.clear(); }
+    if (_pendingTextureFlushes.size) { _pendingTextureFlushes.forEach(t => { t.needsUpdate = true; }); _pendingTextureFlushes.clear(); }
   }
   function clearAllPaintLayers(target, baseColor) {
     if (!target || !target.ctx) return;
@@ -7646,12 +8216,73 @@
     const nn = prompt('Layer name', l.name);
     if (nn && nn.trim()) { l.name = nn.trim().slice(0, 40); buildTerrainDock(); }
   }
-  function loadBrushTextureImage(file) {
-    const img = new Image();
-    img.onload = () => { brushTextureImg = img; _brushTexturePattern = null; toast('Brush texture loaded.', 1600); buildTerrainDock(); };
-    img.onerror = () => toast('Could not load that image.', 1800);
-    img.src = URL.createObjectURL(file);
+  // Accepts one OR MANY texture files for the stamp brush at once — same multi-select +
+  // auto-classify-by-filename UX as the Material panel and Character Paint's "Load texture(s)…",
+  // reusing the exact same TEXTURE_SLOT_RULES/classifyTextureSlot so a file named "*_normal.png" is
+  // recognized identically everywhere in the app. Only Base Color becomes the actual repeating
+  // stamp image (that's the one thing a 2D brush pattern can be) — everything else recognized
+  // (Normal, Roughness, Metalness, AO, Emissive, Alpha, Height/Bump, Displacement, Light Map) is
+  // applied straight onto the ground's real material, so a brush loaded with a rock/brick/grass
+  // texture SET actually shades like that material everywhere on the ground — proper PBR lighting,
+  // not just a flat painted color — instead of only being a flat repeating pattern like before.
+  function loadBrushTextureSet(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    (async () => {
+      const usedSlots = new Set();
+      const assignments = []; // { slot, tex, name }
+      const skipped = [];
+      for (const f of list) {
+        const guess = classifyTextureSlot(f.name);
+        let slot = guess ? guess.slot : null;
+        const srgb = guess ? guess.srgb : true;
+        if (!slot) {
+          if (!usedSlots.has('map')) slot = 'map';
+          else { skipped.push(f.name); continue; }
+        }
+        if (usedSlots.has(slot)) { skipped.push(f.name); continue; }
+        try {
+          const tex = await loadImageAsTexture(f, srgb);
+          assignments.push({ slot, tex, name: f.name });
+          usedSlots.add(slot);
+        } catch (err) { skipped.push(f.name); }
+      }
+      if (!assignments.length) { toast('Could not recognize any of those images as textures.', 2400); return; }
+
+      const baseColor = assignments.find(a => a.slot === 'map');
+      const materialSlots = assignments.filter(a => a.slot !== 'map');
+      const needsStandard = materialSlots.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
+
+      if (baseColor) {
+        brushTextureImg = baseColor.tex.image;
+        _brushTexturePattern = null;
+      }
+
+      let upgraded = 0;
+      brushLoadedSlots.clear();
+      assignments.forEach(a => brushLoadedSlots.add(a.slot));
+      if (materialSlots.length) {
+        // Ground meshes this stamp brush actually paints onto: every custom-terrain paint surface,
+        // or just the single procedural ground plane — same set currentPaintTarget() draws pixels
+        // into, so the PBR maps land on exactly what the brush visually represents.
+        const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+        groundMeshes.forEach(mesh => {
+          if (needsStandard) { const prevMat = firstMaterialOf(mesh); const newMat = ensureStandardMaterial(mesh); if (newMat !== prevMat) upgraded++; }
+          const mat = firstMaterialOf(mesh);
+          if (!mat) return;
+          materialSlots.forEach(a => { mat[a.slot] = a.tex; });
+          mat.needsUpdate = true;
+        });
+      }
+
+      buildTerrainDock();
+      const summary = assignments.map(a => TEXTURE_SLOT_LABEL[a.slot] + (a.slot === 'map' ? ' (stamp)' : '')).join(', ');
+      const upgradeNote = upgraded ? (' (upgraded ground material to support it)') : '';
+      toast('Loaded: ' + summary + upgradeNote + (skipped.length ? (' — skipped ' + skipped.length + ' unrecognized file(s)') : ''), 3800);
+    })();
   }
+  // Kept as a thin wrapper for any other call site still passing a single File.
+  function loadBrushTextureImage(file) { loadBrushTextureSet([file]); }
 
   // Builds a soft round brush mask (honoring Hardness + Falloff) in a small scratch canvas, fills
   // it with the given color/pattern, and composites that onto the destination — shared by every
@@ -7857,6 +8488,85 @@
       img.src = URL.createObjectURL(f);
     };
     inp.click();
+  }
+  // Bulk version: select photos for SEVERAL of the named ground materials (Rock, Grass, Dirt...)
+  // in one go, instead of one "Import photo for X" tap per material. Each filename is matched
+  // against the ground slots by name (e.g. "rock_02.jpg" or "Rocky Path.png" both match the Rock
+  // slot) — a PBR-style suffix like "_normal"/"_roughness" is stripped first via the SAME
+  // classifyTextureSlot used by the Material/Texture panels, both so "Rock_BaseColor.jpg" still
+  // matches "Rock", and so a recognized non-albedo channel gets remembered on the slot for
+  // syncActiveGroundSlotMaterial() to push onto the ground's real material — giving this brush
+  // proper PBR shading too, not just a flat painted pattern, exactly like the Texture tool.
+  const GROUND_SLOT_ALIASES = { drygrass: ['dry grass', 'dead grass', 'drygrass'] };
+  function matchGroundSlotByName(baseName) {
+    const n = baseName.toLowerCase().replace(/[_\-.]+/g, ' ').trim();
+    let best = null, bestLen = 0;
+    groundSlots.forEach(slot => {
+      const candidates = [slot.id, slot.name.toLowerCase(), ...(GROUND_SLOT_ALIASES[slot.id] || [])];
+      candidates.forEach(c => {
+        const cn = c.toLowerCase();
+        if (n.includes(cn) && cn.length > bestLen) { best = slot; bestLen = cn.length; }
+      });
+    });
+    return best;
+  }
+  function importGroundSlotTextureSet(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    (async () => {
+      const matched = new Map(); // slot -> { base: {tex,name}?, extras: [{slot,tex,name}] }
+      const unmatched = [];
+      for (const f of list) {
+        const stem = f.name.replace(/\.[a-z0-9]+$/i, '');
+        const guess = classifyTextureSlot(f.name);
+        const pbrSlot = guess ? guess.slot : 'map';
+        const srgb = guess ? guess.srgb : true;
+        // Strip the recognized PBR-channel token (if any) out of the stem before name-matching,
+        // so "Rock_Normal.jpg" matches the Rock slot the same as "Rock_BaseColor.jpg" does.
+        const escapedToken = guess ? guess.matchedToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+        const strippedStem = guess ? stem.replace(new RegExp(escapedToken, 'i'), ' ') : stem;
+        const groundSlot = matchGroundSlotByName(strippedStem) || matchGroundSlotByName(stem);
+        if (!groundSlot) { unmatched.push(f.name); continue; }
+        let tex = null;
+        try { tex = await loadImageAsTexture(f, srgb); } catch (err) { unmatched.push(f.name); continue; }
+        if (!matched.has(groundSlot)) matched.set(groundSlot, { base: null, extras: [] });
+        const rec = matched.get(groundSlot);
+        if (pbrSlot === 'map' && !rec.base) rec.base = { tex, name: f.name };
+        else rec.extras.push({ slot: pbrSlot, tex, name: f.name });
+      }
+      if (!matched.size) { toast('None of those filenames matched a material — try including the material name, e.g. "Rock_basecolor.jpg".', 3600); return; }
+
+      const summaryParts = [];
+      matched.forEach((rec, slot) => {
+        if (rec.base) { slot.img = rec.base.tex.image; slot._dirty = true; slot._imgRev = (slot._imgRev || 0) + 1; }
+        slot._pbr = slot._pbr || {};
+        rec.extras.forEach(x => { slot._pbr[x.slot] = x.tex; });
+        const parts = [];
+        if (rec.base) parts.push('Base Color');
+        rec.extras.forEach(x => parts.push(TEXTURE_SLOT_LABEL[x.slot]));
+        summaryParts.push(slot.name + ' (' + parts.join(', ') + ')');
+      });
+      if (groundSlots.includes(activeGroundSlot())) syncActiveGroundSlotMaterial();
+      buildTerrainDock();
+      toast('Loaded — ' + summaryParts.join('; ') + (unmatched.length ? ('. Skipped ' + unmatched.length + ' unmatched file(s).') : '.'), 4200);
+    })();
+  }
+  // Pushes the active ground slot's extra PBR maps (Normal, Roughness, etc. — collected via
+  // importGroundSlotTextureSet above) onto the actual ground mesh's material, the same way the
+  // Texture brush tool's PBR maps are applied — so switching the active material (tapping a
+  // swatch) also updates how the ground actually shades, not just which flat pattern paints.
+  function syncActiveGroundSlotMaterial() {
+    const slot = activeGroundSlot();
+    if (!slot || !slot._pbr || !Object.keys(slot._pbr).length) return;
+    const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+    const needsStandard = Object.keys(slot._pbr).some(s => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(s));
+    groundMeshes.forEach(mesh => {
+      if (needsStandard) ensureStandardMaterial(mesh);
+      const mat = firstMaterialOf(mesh);
+      if (!mat) return;
+      Object.keys(slot._pbr).forEach(s => { mat[s] = slot._pbr[s]; });
+      mat.needsUpdate = true;
+    });
   }
 
   // ---------- Mountain Generator — works on procedural ground AND imported maps (Phase 11) ----------
@@ -9510,18 +10220,25 @@
     ['normalMap', /(normal|_nrm|_nor[_.]|_n[_.])/i, false],
     ['roughnessMap', /(roughness|_rough|_r[_.])/i, false],
     ['metalnessMap', /(metal(lic|ness)?|_m[_.])/i, false],
-    ['aoMap', /(ambientocclusion|occlusion|_ao[_.])/i, false],
+    ['aoMap', /(ambientocclusion|_ao[_.]|_occlusion[_.])/i, false],
     ['emissiveMap', /(emissive|emission|_e[_.])/i, true],
     ['alphaMap', /(opacity|alpha|transparency)/i, false],
-    ['bumpMap', /(height|bump|displacement|_disp)/i, false],
+    ['bumpMap', /(height|bump)/i, false],
+    // Two slots added to bring the set to 10, matching what Godot's StandardMaterial3D exposes:
+    ['displacementMap', /(displacement|_disp[_.]|parallax)/i, false],
+    ['lightMap', /(lightmap|_lm[_.]|baked ?light|_bake[_.])/i, true],
   ];
   const TEXTURE_SLOT_LABEL = {
     map: 'Base Color', normalMap: 'Normal', roughnessMap: 'Roughness', metalnessMap: 'Metalness',
     aoMap: 'AO', emissiveMap: 'Emissive', alphaMap: 'Alpha', bumpMap: 'Height/Bump',
+    displacementMap: 'Displacement', lightMap: 'Light Map',
   };
   function classifyTextureSlot(filename) {
     const n = filename.toLowerCase();
-    for (const [slot, re, srgb] of TEXTURE_SLOT_RULES) if (re.test(n)) return { slot, srgb };
+    for (const [slot, re, srgb] of TEXTURE_SLOT_RULES) {
+      const m = re.exec(n);
+      if (m) return { slot, srgb, matchedToken: m[0] };
+    }
     return null; // caller decides the fallback (base color) when nothing matches
   }
   function loadImageAsTexture(file, srgb) {
@@ -9606,7 +10323,7 @@
         } catch (err) { skipped.push(f.name); }
       }
       if (!assignments.length) { toast('Could not recognize any of those images as textures.', 2400); return; }
-      const needsStandard = assignments.some(a => ['roughnessMap', 'metalnessMap', 'aoMap'].includes(a.slot));
+      const needsStandard = assignments.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
       const before = objs.map(entry => {
         const mat = firstMaterialOf(entry.mesh);
         return { entry, wasMat: mat, snap: null };
@@ -9955,7 +10672,7 @@
     entry.ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
     entry.ctx.fill();
     entry.ctx.globalAlpha = 1;
-    entry.texture.needsUpdate = true;
+    flagTextureDirty(entry.texture);
   }
 
   // ---------- Dense-map painting fallback (vertex colors) ----------
@@ -10352,7 +11069,10 @@
       else toast('No model there — tap directly on a model already on the map.', 2000);
       return;
     }
-    if (workspace === 'character') { paintCharacterAtPointer(); return; }
+    if (workspace === 'character') {
+      if (CHAR_SCULPT_MODES.includes(charMode)) { handleCharacterSculptAtPointer(); return; }
+      paintCharacterAtPointer(); return;
+    }
     if (m === 'select') {
       const hit = raycastMapObjects();
       if (hit) selectObject(hit.id, multiSelectOn);
@@ -10405,6 +11125,15 @@
       _lastStrokeClientPt = { x: pt.cx, y: pt.cy };
       return;
     }
+    // Character body sculpt is the same kind of expensive full-mesh-per-call work as terrain vertex
+    // sculpting above (walks every vertex, recomputes normals) — one call per move event already
+    // covers a fast swipe via sculptCharacterAt's own radius test, so skip the screen-space
+    // multi-stamp walk below for these modes too.
+    if (workspace === 'character' && CHAR_SCULPT_MODES.includes(m)) {
+      handleCharacterSculptAtPointer();
+      _lastStrokeClientPt = { x: pt.cx, y: pt.cy };
+      return;
+    }
 
     const stamp = workspace === 'character' ? paintCharacterAtPointer : handleTerrainAtPointer;
     // Cheap 2D canvas dabs (texture paint, ground paint) and per-point placement (vegetation, delete
@@ -10440,11 +11169,13 @@
     // work entirely unless a map-editing gesture was actually in progress.
     _lastStrokeClientPt = null;
     _lastSculptWorldPt = null;
+    _lastCharSculptWorldPt = null;
     if (!isPointerDown) return;
     if (terrainMode === 'deletebrush' && pendingDeleteIds.length) finishDeleteBrush();
     if (terrainMode === 'deletebrush' && grassDeleteBatch.length) finishGrassDeleteStroke();
     if (terrainMode === 'vegetation' && grassPlaceBatch.length) finishGrassPlaceStroke();
     if (strokeSavedTerrain) terrainCommitUndo('sculpt');
+    if (_charSculptStrokeActive) { charSculptCommitUndo(); _charSculptStrokeActive = false; }
     if (_paintStrokeBefore.size) { pushCanvasHistory('paint', Array.from(_paintStrokeBefore.values())); _paintStrokeBefore = new Map(); }
     isPointerDown = false;
     strokeSavedChar = {};
@@ -10708,7 +11439,7 @@
     }
   }
 
-  let charSubTab = 'info'; // within the Character tab: info | paint
+  let charSubTab = 'info'; // within the Character tab: info | paint | sculpt
   let charToolbarMoreOpen = false;
   function buildCharacterStubTab(icon, title, items, blurb) {
     const secLabel = document.createElement('div'); secLabel.className = 'sec-label'; secLabel.textContent = icon + ' ' + title;
@@ -11538,6 +12269,282 @@
     }
   }
 
+  // ============================================================
+  // OBJECTS tab (Character workspace) — mirrors the Map/Terrain workspace's own Object tab:
+  // every item pulled in from the Asset Library via the ➕ panel next to the 3D view shows up
+  // here, and — since a single library asset (e.g. a hair pack) is very often actually many small
+  // meshes bundled together — each one expands to list every individual mesh inside it too, so
+  // even the smallest piece can be picked out, transformed on its own, hidden, or deleted, not
+  // just the pack as a whole.
+  // ============================================================
+  // Every mesh that came in as part of Character A's own imported file (body, and — for models that
+  // bundle it in the same file — hair/clothes baked into the rig) rather than something added
+  // afterward via ＋ from the Asset Library. Those added items already reparent under charRoot too
+  // (see attachOutfitItem), so anything belonging to a characterOutfitItems entry — or nested inside
+  // one — is excluded here to avoid listing the same piece twice.
+  function getBaseBodyMeshes() {
+    if (!charRoot) return [];
+    const outfitObjects = new Set(characterOutfitItems.map(o => o.object));
+    const isInsideOutfitItem = (o) => { let p = o; while (p) { if (outfitObjects.has(p)) return true; p = p.parent; } return false; };
+    const meshes = [];
+    charRoot.traverse(o => { if (o.isMesh && !isInsideOutfitItem(o)) meshes.push(o); });
+    return meshes;
+  }
+
+  let charObjSearchQuery = '';
+  function buildCharacterObjectsTab() {
+    if (!charRoot) {
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:12px;color:var(--ink-dim);margin:4px 2px 10px;line-height:1.6;';
+      note.textContent = 'Import Character A first — then anything you add from the Asset Library (hair, clothes, accessories) shows up here, right down to its individual pieces.';
+      dock.appendChild(note);
+      const bImport = document.createElement('button'); bImport.className = 'btn primary'; bImport.style.width = '100%';
+      bImport.textContent = 'Import Character (FBX / GLB)';
+      bImport.onclick = () => openFilePicker(fileInputFbx);
+      dock.appendChild(bImport);
+      return;
+    }
+
+    const hint = document.createElement('p');
+    hint.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:2px 2px 10px;line-height:1.5;';
+    hint.textContent = 'Tap ＋ in the panel on the right side of the 3D view to add something from your Asset Library — it drops in the middle of the view. Every item below can be selected (drives Move / Rotate / Scale in that same panel), hidden, or removed — tap ▸ to open a pack and get down to its individual pieces.';
+    dock.appendChild(hint);
+
+    // ---- Character body: every mesh that came in with the original import itself (body parts,
+    // and any hair/clothes that were already part of that file) — separate from "Added items"
+    // below, which is only things attached afterward from the Asset Library. ----
+    const bodyLabel = document.createElement('div'); bodyLabel.className = 'sec-label'; bodyLabel.style.margin = '2px 2px 8px';
+    dock.appendChild(bodyLabel);
+    const bodyListWrap = document.createElement('div'); bodyListWrap.className = 'objlist'; bodyListWrap.style.marginBottom = '16px';
+    dock.appendChild(bodyListWrap);
+
+    function renderBodyList() {
+      bodyListWrap.innerHTML = '';
+      const meshes = getBaseBodyMeshes();
+      bodyLabel.textContent = 'Character body — original pieces (' + meshes.length + ')';
+      if (!meshes.length) {
+        const p = document.createElement('div'); p.style.cssText = 'padding:10px;font-size:12px;color:var(--ink-dim);';
+        p.textContent = 'No separate pieces found in this import — it came in as a single mesh.';
+        bodyListWrap.appendChild(p);
+        return;
+      }
+      meshes.forEach((mesh, mi) => {
+        const subSel = selectedBodyMesh === mesh;
+        const row = document.createElement('div'); row.className = 'objrow' + (subSel ? ' selected' : '');
+        row.onclick = (e) => { if (e.target.tagName === 'BUTTON') return; selectedOutfitId = null; selectedOutfitMesh = null; selectedBodyMesh = subSel ? null : mesh; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+
+        const nameEl = document.createElement('span'); nameEl.className = 'objname';
+        nameEl.style.cssText = mesh.visible ? '' : 'color:var(--ink-faint);text-decoration:line-through;';
+        nameEl.textContent = mesh.name || ('Body part ' + (mi + 1));
+        row.appendChild(nameEl);
+
+        const bSel = document.createElement('button'); bSel.className = 'iconmini' + (subSel ? ' on' : '');
+        bSel.textContent = subSel ? '◎' : '↖';
+        bSel.title = 'Select just this piece — Move / Rotate / Scale it on its own from the panel on the right';
+        bSel.onclick = () => { selectedOutfitId = null; selectedOutfitMesh = null; selectedBodyMesh = subSel ? null : mesh; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+        row.appendChild(bSel);
+
+        const eye = document.createElement('button'); eye.className = 'iconmini' + (mesh.visible ? ' on' : '');
+        eye.textContent = mesh.visible ? '👁' : '🚫';
+        eye.title = mesh.visible ? 'Hide this piece' : 'Show this piece';
+        eye.onclick = () => { mesh.visible = !mesh.visible; renderBodyList(); requestRender(); };
+        row.appendChild(eye);
+
+        bodyListWrap.appendChild(row);
+      });
+    }
+    renderBodyList();
+
+    const boneNote = document.createElement('p'); boneNote.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 16px;line-height:1.5;';
+    boneNote.textContent = 'Looking for bones? The 🦴 Skeleton tab lists every bone in the rig, region by region.';
+    dock.appendChild(boneNote);
+
+    const searchRow = document.createElement('div'); searchRow.className = 'row';
+    const search = document.createElement('input'); search.className = 'searchbox'; search.placeholder = 'Search added items by name…'; search.value = charObjSearchQuery;
+    search.oninput = () => { charObjSearchQuery = search.value; renderCharObjList(); };
+    searchRow.appendChild(search); dock.appendChild(searchRow);
+
+    const label = document.createElement('div'); label.className = 'sec-label'; label.style.margin = '8px 2px 8px'; label.textContent = 'Added from Asset Library (' + characterOutfitItems.length + ')';
+    dock.appendChild(label);
+
+    const listWrap = document.createElement('div'); listWrap.id = 'char-objlist-wrap'; listWrap.className = 'objlist';
+    dock.appendChild(listWrap);
+
+    function renderCharObjList() {
+      listWrap.innerHTML = '';
+      const q = charObjSearchQuery.toLowerCase();
+      const filtered = characterOutfitItems.filter(o => !q || o.name.toLowerCase().includes(q));
+      if (!characterOutfitItems.length) {
+        const p = document.createElement('div'); p.style.cssText = 'padding:10px;font-size:12px;color:var(--ink-dim);';
+        p.textContent = 'Nothing added yet — tap ＋ in the panel on the right side of the 3D view.';
+        listWrap.appendChild(p);
+        return;
+      }
+      if (!filtered.length) {
+        const p = document.createElement('div'); p.style.cssText = 'padding:10px;font-size:12px;color:var(--ink-dim);';
+        p.textContent = 'No matching items.';
+        listWrap.appendChild(p);
+        return;
+      }
+
+      filtered.forEach(entry => {
+        const meshes = [];
+        entry.object.traverse(o => { if (o.isMesh) meshes.push(o); });
+        const isSel = entry.id === selectedOutfitId;
+        const expanded = !!entry._objTabOpen;
+
+        const groupRow = document.createElement('div'); groupRow.className = 'objrow' + (isSel ? ' selected' : '');
+        groupRow.onclick = (e) => { if (e.target.tagName === 'BUTTON') return; selectedOutfitId = isSel ? null : entry.id; selectedOutfitMesh = null; selectedBodyMesh = null; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+
+        const expBtn = document.createElement('button'); expBtn.className = 'iconmini' + (expanded ? ' on' : '');
+        expBtn.textContent = meshes.length > 1 ? (expanded ? '▾' : '▸') : '•';
+        expBtn.title = meshes.length > 1 ? 'Show every piece inside this item' : 'Single-piece item';
+        expBtn.disabled = meshes.length <= 1;
+        expBtn.onclick = () => { entry._objTabOpen = !entry._objTabOpen; renderCharObjList(); };
+        groupRow.appendChild(expBtn);
+
+        const nameEl = document.createElement('span'); nameEl.className = 'objname';
+        if (entry.object.visible === false) nameEl.style.cssText = 'color:var(--ink-dim);text-decoration:line-through;';
+        nameEl.textContent = entry.name + (entry.kind === 'skinned' ? ' (rigged)' : '') + ' — ' + meshes.length + ' piece' + (meshes.length === 1 ? '' : 's');
+        groupRow.appendChild(nameEl);
+
+        const bSel = document.createElement('button'); bSel.className = 'iconmini' + (isSel ? ' on' : '');
+        bSel.textContent = isSel ? '◎' : '↖';
+        bSel.title = 'Select the whole item — Move / Rotate / Scale it from the panel on the right';
+        bSel.onclick = () => { selectedOutfitId = isSel ? null : entry.id; selectedOutfitMesh = null; selectedBodyMesh = null; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+        groupRow.appendChild(bSel);
+
+        const eyeBtn = document.createElement('button'); eyeBtn.className = 'iconmini' + (entry.object.visible !== false ? ' on' : '');
+        eyeBtn.textContent = entry.object.visible === false ? '🚫' : '👁';
+        eyeBtn.title = entry.object.visible === false ? 'Show this item' : 'Hide this item (stays out of export too)';
+        eyeBtn.onclick = () => { entry.object.visible = entry.object.visible === false ? true : false; renderCharObjList(); requestRender(); };
+        groupRow.appendChild(eyeBtn);
+
+        const bDel = document.createElement('button'); bDel.className = 'iconmini';
+        bDel.textContent = '🗑';
+        bDel.title = 'Remove this item for good (frees memory — undo won\'t bring it back)';
+        bDel.onclick = () => { if (selectedOutfitId === entry.id) { selectedOutfitId = null; selectedOutfitMesh = null; } removeOutfitItem(entry.id); refreshUI(); };
+        groupRow.appendChild(bDel);
+
+        listWrap.appendChild(groupRow);
+
+        if (expanded && meshes.length > 1) {
+          meshes.forEach((mesh, mi) => {
+            const subSel = gizmo.object === mesh;
+            const subRow = document.createElement('div'); subRow.className = 'objrow' + (subSel ? ' selected' : '');
+            subRow.style.paddingLeft = '28px';
+            subRow.onclick = (e) => { if (e.target.tagName === 'BUTTON') return; selectedOutfitId = entry.id; selectedOutfitMesh = mesh; selectedBodyMesh = null; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+
+            const subName = document.createElement('span'); subName.className = 'objname';
+            subName.style.cssText = 'font-size:11px;' + (mesh.visible ? '' : 'color:var(--ink-faint);text-decoration:line-through;');
+            subName.textContent = mesh.name || ('Piece ' + (mi + 1));
+            subRow.appendChild(subName);
+
+            const bSubSel = document.createElement('button'); bSubSel.className = 'iconmini' + (subSel ? ' on' : '');
+            bSubSel.textContent = subSel ? '◎' : '↖';
+            bSubSel.title = 'Select just this piece — Move / Rotate / Scale it on its own from the panel on the right';
+            bSubSel.onclick = () => { selectedOutfitId = entry.id; selectedOutfitMesh = mesh; selectedBodyMesh = null; if (charMode !== 'orbit') setCharMode('orbit'); refreshUI(); };
+            subRow.appendChild(bSubSel);
+
+            const subEye = document.createElement('button'); subEye.className = 'iconmini' + (mesh.visible ? ' on' : '');
+            subEye.textContent = mesh.visible ? '👁' : '🚫';
+            subEye.title = mesh.visible ? 'Hide this piece' : 'Show this piece';
+            subEye.onclick = () => { mesh.visible = !mesh.visible; renderCharObjList(); requestRender(); };
+            subRow.appendChild(subEye);
+
+            const subDel = document.createElement('button'); subDel.className = 'iconmini';
+            subDel.textContent = '🗑';
+            subDel.title = 'Remove just this piece — Undo (↶ top bar) brings it back';
+            subDel.onclick = () => {
+              if (selectedOutfitMesh === mesh) selectedOutfitMesh = null;
+              const meshParent = mesh.parent;
+              const wasGizmoTarget = gizmo.object === mesh;
+              if (wasGizmoTarget) gizmo.detach();
+              if (meshParent) meshParent.remove(mesh);
+              pushObjHistory({
+                label: 'remove ' + (mesh.name || 'piece'),
+                undo: () => { if (meshParent) meshParent.add(mesh); refreshUI(); renderCharObjList(); },
+                redo: () => { if (mesh.parent) mesh.parent.remove(mesh); refreshUI(); renderCharObjList(); },
+              });
+              toast('Removed "' + (mesh.name || 'that piece') + '" — Undo (↶ top bar) brings it back.', 2400);
+              refreshUI(); renderCharObjList();
+            };
+            subRow.appendChild(subDel);
+
+            listWrap.appendChild(subRow);
+          });
+        }
+      });
+    }
+    renderCharObjList();
+
+    // ---- Transform panel for whatever's currently selected (an added item, one of its expanded
+    // sub-pieces, or a body piece from the list above) — same live Position/Rotation/Scale sliders
+    // as the Map/Terrain Object tab, so lining up hair/clothes doesn't mean fighting the on-screen
+    // arrows in a cramped 3D view. Delete lives right here too since it's now safely undoable
+    // (see removeOutfitItem above) — ↶ in the top bar brings anything removed straight back. ----
+    const activeOutfitEntry = characterOutfitItems.find(o => o.id === selectedOutfitId) || null;
+    const targetMesh = (selectedOutfitMesh && selectedOutfitMesh.parent) ? selectedOutfitMesh
+      : (activeOutfitEntry ? activeOutfitEntry.object : ((selectedBodyMesh && selectedBodyMesh.parent) ? selectedBodyMesh : null));
+
+    if (targetMesh) {
+      dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
+      const tLabel = document.createElement('div'); tLabel.className = 'sec-label';
+      tLabel.textContent = 'Transform — ' + (targetMesh.name || (activeOutfitEntry ? activeOutfitEntry.name : 'selected piece'));
+      dock.appendChild(tLabel);
+      const tHint = document.createElement('p'); tHint.style.cssText = 'font-size:10.5px;color:var(--ink-dim);margin:-4px 2px 8px;line-height:1.4;';
+      tHint.textContent = 'Same live sliders as the Map/Terrain Object tab — drag (or tap a number to type it) to nudge this into place.';
+      dock.appendChild(tHint);
+
+      let tSnapshot = null;
+      const commitLater = () => { if (tSnapshot) { const before = tSnapshot; const after = snapshotTransform(targetMesh); pushObjHistory({ label: 'transform ' + (targetMesh.name || 'character piece'), undo: () => applyTransform(targetMesh, before), redo: () => applyTransform(targetMesh, after) }); tSnapshot = null; } };
+      const startSnap = () => { if (!tSnapshot) tSnapshot = snapshotTransform(targetMesh); };
+
+      const posFields = ['x', 'y', 'z'].map(axis => {
+        const s = mkSlider(-3, 3, 0.01, targetMesh.position[axis].toFixed(2), v => { startSnap(); targetMesh.position[axis] = v; requestRender(); }, v => Number(v).toFixed(2));
+        s.range.onpointerup = commitLater; s.range.ontouchend = commitLater;
+        return mkField('📍', axis.toUpperCase(), s);
+      });
+      dock.appendChild(mkFieldGrid(posFields, 3));
+
+      const rotFields = ['x', 'y', 'z'].map(axis => {
+        const degNow = Math.round(THREE.MathUtils.radToDeg(targetMesh.rotation[axis]));
+        const s = mkSlider(0, 360, 1, degNow, v => { startSnap(); targetMesh.rotation[axis] = THREE.MathUtils.degToRad(v); requestRender(); }, v => v + '°');
+        s.range.onpointerup = commitLater; s.range.ontouchend = commitLater;
+        return mkField('🔄', axis.toUpperCase(), s);
+      });
+      dock.appendChild(mkFieldGrid(rotFields, 3));
+
+      const scaleToSlider = (s) => Math.round(Math.log10(Math.max(0.001, s)) * 1000);
+      const sliderToScale = (v) => Math.pow(10, v / 1000);
+      const fmtScale = (s) => s < 0.01 ? s.toFixed(4) : s < 1 ? s.toFixed(3) : s.toFixed(2);
+      const sc = mkSlider(-3000, 2000, 1, scaleToSlider(targetMesh.scale.x), v => { startSnap(); const s = sliderToScale(v); targetMesh.scale.set(s, s, s); requestRender(); }, v => fmtScale(sliderToScale(v)));
+      sc.range.onpointerup = commitLater; sc.range.ontouchend = commitLater;
+      dock.appendChild(mkFieldGrid([mkField('📏', 'Scale', sc)], 1));
+
+      const tActions = document.createElement('div'); tActions.className = 'row actions';
+      const bReset = document.createElement('button'); bReset.className = 'btn'; bReset.textContent = 'Reset transform';
+      bReset.onclick = () => {
+        const before = snapshotTransform(targetMesh);
+        targetMesh.position.set(0, 0, 0); targetMesh.rotation.set(0, 0, 0); targetMesh.scale.set(1, 1, 1);
+        const after = snapshotTransform(targetMesh);
+        pushObjHistory({ label: 'reset transform', undo: () => applyTransform(targetMesh, before), redo: () => applyTransform(targetMesh, after) });
+        refreshUI();
+      };
+      tActions.appendChild(bReset);
+      // Delete only offered here for an added item (whole item or one of its expanded sub-pieces) —
+      // never for a body piece from Character A's own import, same safety line as the list above.
+      if (activeOutfitEntry) {
+        const bDel = document.createElement('button'); bDel.className = 'btn';
+        bDel.textContent = '🗑 Delete';
+        bDel.title = 'Remove this added item — Undo (↶ top bar) brings it back.';
+        bDel.onclick = () => { removeOutfitItem(activeOutfitEntry.id); refreshUI(); };
+        tActions.appendChild(bDel);
+      }
+      dock.appendChild(tActions);
+    }
+  }
+
   function buildCharacterDock() {
     dock.innerHTML = '';
     setModeBar(null); // Character workspace doesn't use the terrain Orbit/<tool> switch
@@ -11546,7 +12553,7 @@
 
     // ---- Character Studio navigation — mirrors the terrain workspace's primary/"more" pattern ----
     const PRIMARY = [
-      ['character', '🧍', 'Character'], ['skeleton', '🦴', 'Skeleton'], ['rig', '🔗', 'Rig'],
+      ['character', '🧍', 'Character'], ['objects', '🧩', 'Objects'], ['skeleton', '🦴', 'Skeleton'], ['rig', '🔗', 'Rig'],
       ['animation', '🎬', 'Animation'], ['export', '📤', 'Export']
     ];
     const SECONDARY = [
@@ -11554,7 +12561,7 @@
     ];
     const selectTab = (t) => {
       charDockTab = t;
-      if (t !== 'character' || charSubTab !== 'paint') setCharMode('orbit'); else buildCharacterDock();
+      if (t !== 'character' || (charSubTab !== 'paint' && charSubTab !== 'sculpt')) setCharMode('orbit'); else buildCharacterDock();
     };
 
     if (SECONDARY.some(([t]) => t === charDockTab)) charToolbarMoreOpen = true;
@@ -11594,10 +12601,10 @@
     if (charDockTab === 'character') {
       const subRow = document.createElement('div'); subRow.className = 'row';
       const subSeg = document.createElement('div'); subSeg.className = 'seg';
-      [['info', 'ℹ Info'], ['paint', '🎨 Paint Texture']].forEach(([t, label]) => {
+      [['info', 'ℹ Info'], ['paint', '🎨 Paint Texture'], ['sculpt', '⛰ Sculpt Body']].forEach(([t, label]) => {
         const b = document.createElement('button'); b.textContent = label;
         if (t === charSubTab) b.classList.add('active');
-        b.onclick = () => { charSubTab = t; if (t !== 'paint') { setCharMode('orbit'); } else { buildCharacterDock(); } };
+        b.onclick = () => { charSubTab = t; if (t !== 'paint' && t !== 'sculpt') { setCharMode('orbit'); } else { buildCharacterDock(); } };
         subSeg.appendChild(b);
       });
       subRow.appendChild(subSeg); dock.appendChild(subRow);
@@ -11672,7 +12679,7 @@
 
         const actions1 = document.createElement('div'); actions1.className = 'row actions';
         const bLoad = document.createElement('button'); bLoad.className = 'btn'; bLoad.textContent = 'Import FBX/GLB'; bLoad.onclick = () => openFilePicker(fileInputFbx);
-        const bImg = document.createElement('button'); bImg.className = 'btn'; bImg.textContent = 'Load texture image'; bImg.onclick = () => openFilePicker(fileInputImage);
+        const bImg = document.createElement('button'); bImg.className = 'btn'; bImg.textContent = 'Load texture(s)…'; bImg.onclick = () => openFilePicker(fileInputImage);
         actions1.appendChild(bLoad); actions1.appendChild(bImg);
         dock.appendChild(actions1);
 
@@ -11705,6 +12712,46 @@
         note.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:8px 2px 0;line-height:1.5;';
         note.textContent = 'OBJ/GLB model exports moved to the Export tab. This tab is just for painting; switch to the Animation tab to bring in your fight-animation files (FBX or GLB), then export everything together from Export.';
         dock.appendChild(note);
+      } else if (charSubTab === 'sculpt') {
+        // ---- Sculpt Body sub-tab: brush mode + size live in the floating left panel (#charSculptBar,
+        // same pattern as Terrain/Map's left camera bar) so they stay reachable while your thumb is
+        // busy sculpting in the viewport — this tab is just for what doesn't fit there: Strength, and
+        // a couple of one-off actions. ----
+        if (!charRoot) {
+          const note = document.createElement('p');
+          note.style.cssText = 'font-size:12px;color:var(--ink-dim);margin:4px 2px 0;line-height:1.6;';
+          note.textContent = 'Import Character A first, then come back here to sculpt its body shape.';
+          dock.appendChild(note);
+        } else {
+          const note = document.createElement('p');
+          note.style.cssText = 'font-size:12px;color:var(--ink-dim);margin:4px 2px 12px;line-height:1.6;';
+          note.textContent = 'Use the panel on the left edge of the viewport: pick Raise 🔺 / Lower 🔻 / Smooth 🌊, choose a brush size (S/M/L/XL), then drag directly on the body — muscle bumps, height tweaks, silhouette changes, like sculpting terrain.';
+          dock.appendChild(note);
+
+          const strengthRow = document.createElement('div'); strengthRow.className = 'row';
+          strengthRow.innerHTML = '<div class="label">Strength</div>';
+          const sRange = document.createElement('input'); sRange.type = 'range'; sRange.min = 5; sRange.max = 150; sRange.value = Math.round(charSculptStrength * 1000);
+          const sVal = document.createElement('span'); sVal.style.cssText = 'font-size:12px;color:var(--ink-dim);width:36px;text-align:right;'; sVal.textContent = charSculptStrength.toFixed(3);
+          sRange.oninput = () => { charSculptStrength = parseInt(sRange.value, 10) / 1000; sVal.textContent = charSculptStrength.toFixed(3); };
+          strengthRow.appendChild(sRange); strengthRow.appendChild(sVal); dock.appendChild(strengthRow);
+
+          const div2 = document.createElement('div'); div2.className = 'divider'; dock.appendChild(div2);
+          const actionsReset = document.createElement('div'); actionsReset.className = 'row actions';
+          const bReset = document.createElement('button'); bReset.className = 'btn'; bReset.style.flex = '1'; bReset.textContent = 'Reset body shape';
+          bReset.title = 'Undoes every sculpt stroke made this session, back to the imported shape.';
+          bReset.onclick = () => {
+            let undone = 0;
+            while (objHistory.length && objHistory[objHistory.length - 1].label === 'character sculpt') {
+              const e = objHistory.pop();
+              e.undo();
+              objRedo.push(e);
+              undone++;
+            }
+            refreshUI();
+            toast(undone ? ('Reverted ' + undone + ' sculpt stroke(s).') : 'No sculpt strokes to undo yet.', 2000);
+          };
+          actionsReset.appendChild(bReset); dock.appendChild(actionsReset);
+        }
       } else {
         // ---- Info sub-tab: Character A / B slots + live dimensions ----
         const cardsRow = document.createElement('div');
@@ -12271,6 +13318,8 @@
     // all fully wired up below — every menu slot in the Character Studio nav now has a real
     // implementation behind it, not just a reserved placeholder.
     // ============================================================
+    } else if (charDockTab === 'objects') {
+      buildCharacterObjectsTab();
     } else if (charDockTab === 'skeleton') {
       buildSkeletonTab();
     } else if (charDockTab === 'rig') {
@@ -12855,10 +13904,21 @@
         const patCanvas = buildSlotPatternCanvas(slot);
         sw.style.backgroundImage = 'url(' + patCanvas.toDataURL() + ')';
         sw.style.backgroundSize = 'cover';
-        sw.onclick = () => { activeGroundSlotId = slot.id; buildTerrainDock(); };
+        sw.onclick = () => { activeGroundSlotId = slot.id; syncActiveGroundSlotMaterial(); buildTerrainDock(); };
         presetWrap.appendChild(sw);
       });
       matRow.appendChild(presetWrap); dock.appendChild(matRow);
+
+      const bulkRow = document.createElement('div'); bulkRow.className = 'row actions';
+      const bBulk = document.createElement('button'); bBulk.className = 'btn primary'; bBulk.style.flex = '1'; bBulk.textContent = 'Upload texture set(s)…';
+      bBulk.title = 'Pick photos for several materials at once — Rock, Grass, Dirt... — each one is matched to the right swatch by its filename.';
+      bBulk.onclick = () => openFilePicker(fileInputGroundSlotBulk);
+      bulkRow.appendChild(bBulk); dock.appendChild(bulkRow);
+      const bulkNote = document.createElement('p');
+      bulkNote.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:2px 2px 8px;line-height:1.5;';
+      bulkNote.textContent = 'Select as many files as you like in one go — name them with the material, e.g. "Rock.jpg", "Grass_basecolor.jpg", "Dirt_normal.jpg" — each lands on the matching swatch automatically.';
+      dock.appendChild(bulkNote);
+
       const slot = activeGroundSlot();
       const scaleS = mkSlider(2, 16, 1, slot.scale, v => { slot.scale = v; slot._dirty = true; });
       dock.appendChild(mkFieldGrid([mkField('🔲', 'Tile', scaleS)], 1));
@@ -12867,15 +13927,51 @@
       bImp.onclick = () => importGroundSlotTexture(slot);
       impRow.appendChild(bImp); dock.appendChild(impRow);
     } else if (paintTool === 'texture') {
-      const texRow = document.createElement('div'); texRow.className = 'row';
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:11.5px;color:var(--ink-dim);margin:0 2px 8px;line-height:1.5;';
+      note.textContent = 'Select every texture file for this brush in one go (e.g. a rock or brick set\u2019s Base Color, Normal, Roughness, AO) — each one is auto-detected by its filename. Base Color becomes the repeating stamp; the rest shade the ground itself.';
+      dock.appendChild(note);
+
       if (brushTextureImg) {
+        const texRow = document.createElement('div'); texRow.className = 'row';
         const thumb = document.createElement('img'); thumb.src = brushTextureImg.src; thumb.style.cssText = 'width:36px;height:36px;border-radius:8px;object-fit:cover;border:1px solid var(--line);';
         const lbl = document.createElement('div'); lbl.style.cssText = 'font-size:11.5px;color:var(--ink-dim);flex:1;'; lbl.textContent = 'Painting with this image as a repeating stamp.';
-        texRow.appendChild(thumb); texRow.appendChild(lbl);
+        texRow.appendChild(thumb); texRow.appendChild(lbl); dock.appendChild(texRow);
       }
-      const bTex = document.createElement('button'); bTex.className = 'btn'; bTex.style.cssText = 'flex:0 0 auto;'; bTex.textContent = brushTextureImg ? 'Change' : 'Load texture image';
+
+      // Status pills — same pattern as the Material panel's slot list, so it's immediately clear
+      // which of this brush's textures were recognized and which weren't.
+      const pillWrap = document.createElement('div'); pillWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;';
+      Object.keys(TEXTURE_SLOT_LABEL).forEach(slot => {
+        const has = brushLoadedSlots.has(slot);
+        const p = document.createElement('div');
+        p.style.cssText = 'font-size:11.5px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);' +
+          (has ? 'background:var(--accent);color:#1a1005;border-color:var(--accent);' : 'color:var(--ink-dim);');
+        p.textContent = (has ? '✓ ' : '— ') + TEXTURE_SLOT_LABEL[slot];
+        pillWrap.appendChild(p);
+      });
+      dock.appendChild(pillWrap);
+
+      const actionsU = document.createElement('div'); actionsU.className = 'row actions';
+      const bTex = document.createElement('button'); bTex.className = 'btn primary'; bTex.style.flex = '1'; bTex.textContent = 'Upload texture file(s)…';
       bTex.onclick = () => openFilePicker(fileInputBrushtex);
-      texRow.appendChild(bTex); dock.appendChild(texRow);
+      actionsU.appendChild(bTex);
+      if (brushLoadedSlots.size) {
+        const bClearTex = document.createElement('button'); bClearTex.className = 'btn'; bClearTex.textContent = 'Remove all textures';
+        bClearTex.onclick = () => {
+          brushTextureImg = null; _brushTexturePattern = null; brushLoadedSlots.clear();
+          const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+          groundMeshes.forEach(mesh => {
+            const mat = firstMaterialOf(mesh); if (!mat) return;
+            Object.keys(TEXTURE_SLOT_LABEL).forEach(s => { if (s !== 'map') mat[s] = null; });
+            mat.needsUpdate = true;
+          });
+          buildTerrainDock();
+          toast('Brush textures removed.', 1800);
+        };
+        actionsU.appendChild(bClearTex);
+      }
+      dock.appendChild(actionsU);
     } else if (paintTool === 'clone') {
       const cloneRow = document.createElement('div'); cloneRow.className = 'row actions';
       const bSrc = document.createElement('button'); bSrc.className = 'btn' + (cloneArmed ? ' primary' : ''); bSrc.textContent = cloneArmed ? 'Tap the map to set source…' : (cloneSourcePt ? 'Re-set clone source' : 'Set clone source');
@@ -13686,7 +14782,7 @@
     const texActions = document.createElement('div'); texActions.className = 'row actions';
     const bAssign = document.createElement('button'); bAssign.className = 'btn primary'; bAssign.textContent = 'Upload texture file(s)…';
     bAssign.onclick = assignTextureToSelected;
-    const bRemoveTex = document.createElement('button'); bRemoveTex.className = 'btn'; bRemoveTex.textContent = 'Remove all textures'; bRemoveTex.disabled = !mat.map && !mat.normalMap && !mat.roughnessMap && !mat.metalnessMap && !mat.aoMap && !mat.emissiveMap && !mat.alphaMap && !mat.bumpMap;
+    const bRemoveTex = document.createElement('button'); bRemoveTex.className = 'btn'; bRemoveTex.textContent = 'Remove all textures'; bRemoveTex.disabled = !Object.keys(TEXTURE_SLOT_LABEL).some(s => mat[s]);
     bRemoveTex.onclick = removeTextureFromSelected;
     texActions.appendChild(bAssign); texActions.appendChild(bRemoveTex); dock.appendChild(texActions);
 
@@ -14097,7 +15193,7 @@
         terrainHeightmapGenScale = v;
         generateHeightmap({ skipUndo: true });
       }, (v) => String(v));
-      const sOct = mkSlider(1, 6, 1, terrainHeightmapGenOctaves, (v) => {
+      const sOct = mkSlider(1, 8, 1, terrainHeightmapGenOctaves, (v) => {
         terrainHeightmapGenOctaves = v;
         generateHeightmap({ skipUndo: true });
       }, (v) => String(v));
@@ -14297,9 +15393,15 @@
     fileInputFbxB.value = '';
   };
   fileInputImage.onchange = (e) => {
-    const f = e.target.files[0];
-    if (f) loadImageAsBaseTexture(f);
+    const files = e.target.files;
+    if (files && files.length) loadPaintTextureSet(files);
     fileInputImage.value = '';
+  };
+  fileInputOutfit.onchange = (e) => {
+    const files = e.target.files;
+    const f = files.length ? pickModelFile(files) : null;
+    if (f) loadOutfitFile(f, files);
+    fileInputOutfit.value = '';
   };
   fileInputAnims.onchange = (e) => {
     if (e.target.files.length) addAnimationFiles(e.target.files);
@@ -14316,9 +15418,14 @@
     fileInputGroundtex.value = '';
   };
   fileInputBrushtex.onchange = (e) => {
-    const f = e.target.files[0];
-    if (f) loadBrushTextureImage(f);
+    const files = e.target.files;
+    if (files && files.length) loadBrushTextureSet(files);
     fileInputBrushtex.value = '';
+  };
+  fileInputGroundSlotBulk.onchange = (e) => {
+    const files = e.target.files;
+    if (files && files.length) importGroundSlotTextureSet(files);
+    fileInputGroundSlotBulk.value = '';
   };
   fileInputTerrainModel.onchange = (e) => {
     const files = e.target.files;
