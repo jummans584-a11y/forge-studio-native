@@ -1338,17 +1338,17 @@
      If you'd rather ship these as local files (fully offline vendor/ folder), download each URL
      below and save it under ./vendor/ with the same filename, then switch these src= back to
      ./vendor/<file>.js — no other code changes needed. -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/modifiers/SimplifyModifier.js"></script>
+<script src="./vendor/three.min.js"></script>
+<script src="./vendor/OrbitControls.js"></script>
+<script src="./vendor/TransformControls.js"></script>
+<script src="./vendor/fflate.js"></script>
+<script src="./vendor/FBXLoader.js"></script>
+<script src="./vendor/GLTFLoader.js"></script>
+<script src="./vendor/OBJLoader.js"></script>
+<script src="./vendor/GLTFExporter.js"></script>
+<script src="./vendor/OBJExporter.js"></script>
+<script src="./vendor/BufferGeometryUtils.js"></script>
+<script src="./vendor/SimplifyModifier.js"></script>
 <script>
 (function () {
   const canvas = document.getElementById('three');
@@ -1953,9 +1953,7 @@
   document.getElementById('btn-snapshot').onclick = () => {
     renderer.render(scene, camera);
     const url = renderer.domElement.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.href = url; link.download = 'snapshot_' + Date.now() + '.png';
-    link.click();
+    downloadDataUrl(url, 'snapshot_' + Date.now() + '.png');
     toast('Snapshot saved.', 1600);
   };
 
@@ -11217,7 +11215,65 @@
   // ============================================================
   // Export helpers
   // ============================================================
-  function downloadDataUrl(dataUrl, filename) {
+  // BUGFIX (nothing exports inside the packaged APK, no permission prompt ever shows): this used to
+  // be a plain browser download — create an <a download> pointing at a blob/data URL and .click() it.
+  // That's the standard web trick and it works fine in a real browser (which is why the browser-test
+  // HTML always worked), but a packaged Capacitor Android WebView has no built-in download handling
+  // for it at all — the click does nothing, silently, no error, no permission dialog. And since the
+  // app never asked Android for any storage permission in the first place (this trick doesn't need
+  // one in a real browser), there was nothing for Android Settings to show a toggle for either —
+  // that's why Permissions looked empty/locked.
+  // Fix: on native Android, write the file for real via the Capacitor Filesystem plugin (into the
+  // app's private Documents area — no permission needed on modern Android), then hand it straight to
+  // the native Share sheet so the person can save it to Downloads, Drive, WhatsApp, wherever they
+  // want. Falls back to the old browser-download behavior when not running as a packaged app (i.e.
+  // still works exactly as before in forge-studio-browser-test.html) or if anything above fails.
+  async function downloadDataUrl(dataUrl, filename) {
+    const isNative = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
+    // TEMP DIAGNOSTIC — tells us exactly which path this takes and why, so if export still doesn't
+    // work we know whether it's "not detected as native", "Filesystem plugin missing", or "writeFile/
+    // Share actually threw an error" instead of guessing. Safe to remove once export is confirmed
+    // working — search for "TEMP DIAGNOSTIC" to find both toast lines.
+    toast('Export: native=' + !!isNative + ', Filesystem=' + !!(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Filesystem) + ', Share=' + !!(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Share), 4000);
+    if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
+      try {
+        let base64;
+        if (dataUrl.startsWith('data:')) {
+          base64 = dataUrl.split(',')[1];
+        } else {
+          // blob: URL — pull the bytes back out and re-encode as base64 for the Filesystem plugin,
+          // which only accepts base64 (or plain text) data, not blob/object URLs.
+          const resp = await fetch(dataUrl);
+          const blob = await resp.blob();
+          base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+        const { Filesystem } = Capacitor.Plugins;
+        const written = await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: 'DOCUMENTS',
+          recursive: true,
+        });
+        toast('TEMP DIAGNOSTIC: file written OK — ' + written.uri, 3200); // TEMP DIAGNOSTIC
+        if (Capacitor.Plugins.Share) {
+          try { await Capacitor.Plugins.Share.share({ title: filename, url: written.uri }); }
+          catch (e) { toast('Share sheet closed/cancelled — file is saved at: ' + written.uri, 4200); }
+        } else {
+          toast('Saved — ' + filename, 2600);
+        }
+        if (dataUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(dataUrl), 4000);
+        return;
+      } catch (err) {
+        console.error('Native file save failed, falling back to browser download:', err);
+        toast('Native save failed: ' + (err && err.message ? err.message : JSON.stringify(err)), 4200);
+        // fall through to the browser-download path below
+      }
+    }
     const link = document.createElement('a');
     link.download = filename;
     link.href = dataUrl;
@@ -11350,12 +11406,7 @@
         blob = new Blob([result], { type: 'model/gltf-binary' });
       }
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = filename;
-      document.body.appendChild(link); // some mobile browsers only fire the download if the anchor is actually in the DOM
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      downloadDataUrl(url, filename);
       const fixNote = (preExportFix.missingTex || preExportFix.brightened) ? (' (cleaned up ' + (preExportFix.missingTex + preExportFix.brightened) + ' broken material reference(s) first)') : '';
       const animNote = (animClips && animClips.length) ? (' with ' + animClips.length + ' animation(s) embedded — they will show up as separate clips on the AnimationPlayer in Godot.') : '.';
       const colTotal = (collisionNaming.applied || 0) + (collisionNaming.convexApplied || 0);
