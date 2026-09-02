@@ -2678,7 +2678,7 @@
         TEX_SIZE = PREMIUM_TEX_SIZE;
         toast('4K unlocked for this session — reload/reopen the current model to paint and export at the new resolution. Closing the app will reset this back to 2K.', 4600);
         refreshUI();
-      });
+      }, true); // alwaysGrant=true — same as the library unlock: a missing/failed ad should never block a feature, it should just unlock anyway
       box.appendChild(btn);
     }
     return box;
@@ -11238,14 +11238,9 @@
   // still works exactly as before in forge-studio-browser-test.html) or if anything above fails.
   async function downloadDataUrl(dataUrl, filename) {
     const isNative = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
-    // TEMP DIAGNOSTIC — tells us exactly which path this takes and why, so if export still doesn't
-    // work we know whether it's "not detected as native", "Filesystem plugin missing", or "writeFile/
-    // Share actually threw an error" instead of guessing. Safe to remove once export is confirmed
-    // working — search for "TEMP DIAGNOSTIC" to find both toast lines.
-    toast('Export: native=' + !!isNative + ', Filesystem=' + !!(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Filesystem) + ', Share=' + !!(window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Share), 4000);
     if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
+      let base64;
       try {
-        let base64;
         if (dataUrl.startsWith('data:')) {
           base64 = dataUrl.split(',')[1];
         } else {
@@ -11260,14 +11255,34 @@
             reader.readAsDataURL(blob);
           });
         }
-        const { Filesystem } = Capacitor.Plugins;
-        const written = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: 'DOCUMENTS',
-          recursive: true,
-        });
-        toast('TEMP DIAGNOSTIC: file written OK — ' + written.uri, 3200); // TEMP DIAGNOSTIC
+      } catch (err) {
+        console.error('Failed to read export data for native save:', err);
+        toast('Export failed: could not read file data.', 3200);
+        return;
+      }
+      const { Filesystem } = Capacitor.Plugins;
+      // BUGFIX (real root cause of "export never works" in the packaged APK): Directory.Documents
+      // on Android maps to a *public* Documents folder on Android 10 and older, which needs
+      // READ/WRITE_EXTERNAL_STORAGE permission that this app never declares or requests — so
+      // writeFile() rejected on every device running Android ≤10, and on some OEM builds of newer
+      // Android too. Directory.Cache is always a private, app-only folder that needs zero
+      // permission on every Android version, and Capacitor's default FileProvider config already
+      // exposes it for sharing — so this is the one directory guaranteed to work everywhere.
+      const tryWrite = async (directory) => Filesystem.writeFile({ path: filename, data: base64, directory, recursive: true });
+      let written;
+      try {
+        written = await tryWrite('CACHE');
+      } catch (err1) {
+        console.error('Write to Cache failed, trying Data:', err1);
+        try {
+          written = await tryWrite('DATA');
+        } catch (err2) {
+          console.error('Native file save failed entirely, falling back to browser download:', err2);
+          toast('Native save failed: ' + (err2 && err2.message ? err2.message : JSON.stringify(err2)), 4200);
+          written = null;
+        }
+      }
+      if (written) {
         if (Capacitor.Plugins.Share) {
           try { await Capacitor.Plugins.Share.share({ title: filename, url: written.uri }); }
           catch (e) { toast('Share sheet closed/cancelled — file is saved at: ' + written.uri, 4200); }
@@ -11276,11 +11291,9 @@
         }
         if (dataUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(dataUrl), 4000);
         return;
-      } catch (err) {
-        console.error('Native file save failed, falling back to browser download:', err);
-        toast('Native save failed: ' + (err && err.message ? err.message : JSON.stringify(err)), 4200);
-        // fall through to the browser-download path below
       }
+      // fall through to the browser-download path below (won't work in the packaged APK either,
+      // but keeps behavior identical to before if native save fails for an unexpected reason)
     }
     const link = document.createElement('a');
     link.download = filename;
