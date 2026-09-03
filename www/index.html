@@ -5652,6 +5652,17 @@
     // Feature Sharpness become the ONLY two things that round or spread it from there.
   let terrainHeightmapInvert = false;    // "Invert Heightmap" — black becomes high, white becomes low
   let terrainHeightmapNormalize = 0;     // "Normalize" 0-100 — blends toward a full min/max stretch of the actual height data, shape-preserving
+
+  // "Symmetrize Peaks" — fixes heightmaps that carry baked-in directional shading (hillshade-style
+  // relief images, like a lit-from-one-side render) instead of pure elevation. Fed raw, that kind of
+  // image makes every mountain lean toward its bright/lit flank because that side's pixels read as
+  // "higher" than the shadowed side even when the real terrain is roughly symmetric. When on, each
+  // mountain in the heightmap is detected by its true peak pixel and rebuilt as a radially symmetric
+  // dome centered exactly on that peak, using the same cosine falloff the Mountain sculpt tool uses —
+  // so tilted/lopsided mountains come out centered and even instead of leaning to one side.
+  let terrainHeightmapSymmetrize = false;
+  let terrainHeightmapPeakThreshold = 45; // 0-100% — brightness cutoff (between the image's min/max) above which a pixel counts as "part of a mountain"; below it stays untouched (valleys/rivers/flats keep their original shape)
+  let terrainHeightmapSymmetrizeBlend = 100; // 0-100% — how much of the rebuilt symmetric dome to blend in vs. the original (lower = keep some original texture/detail, just recentered less aggressively)
   // Caches the resampled+blurred 0..1 height grid keyed by (image, resolution, smoothness) so
   // dragging the Terrain Height slider — which only rescales, never reshapes — doesn't redo the
   // image resample + box-blur passes on every 'input' tick. That redo is the expensive part on
@@ -7493,6 +7504,121 @@
     img.src = url;
   }
 
+  // Detects each mountain's true peak pixel in the (already smoothed) brightness grid and rebuilds
+  // it as a radially symmetric dome centered on that peak, instead of trusting the raw — possibly
+  // directionally-shaded — brightness values. Cells below the threshold (valleys/rivers/flats) are
+  // left completely untouched.
+  //
+  // How it works:
+  //  1. Any cell at/above `cutoff` (gMin + range*thresholdT) is "mountain mask".
+  //  2. Local maxima within the mask become peak candidates; candidates too close to a taller
+  //     already-accepted peak are dropped (so one lumpy mountain doesn't become five).
+  //  3. A multi-source flood fill grows outward from every accepted peak simultaneously, but only
+  //     through masked cells — this assigns every masked cell to its nearest peak (a watershed) and
+  //     records the flood-fill distance, which naturally stops at each mountain's real footprint.
+  //  4. Each masked cell is rewritten using distance-from-its-peak: cos() falloff from the peak's
+  //     true height down to `cutoff` at the mountain's edge — the same falloff curve
+  //     (Math.cos(t*PI*0.5)) the Mountain sculpt brush already uses elsewhere in this file, so the
+  //     resulting shape matches what "Mountain" tool output already looks like.
+  //  5. blendT mixes the rebuilt symmetric height back with the original value per cell, so 100% is
+  //     a fully centered dome and lower values keep some of the source image's original texture.
+  function symmetrizePeaksGrid(grid, res, gMin, gMax, thresholdT, blendT) {
+    const n = res * res;
+    const range = Math.max(1e-6, gMax - gMin);
+    const cutoff = gMin + range * thresholdT;
+
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = grid[i] >= cutoff ? 1 : 0;
+
+    // Neighborhood radius used both for local-max detection and minimum peak separation — scales
+    // with resolution so the same threshold behaves consistently whether Resolution is 32 or 200.
+    const win = Math.max(2, Math.round(res / 40));
+
+    const isPeak = new Uint8Array(n);
+    for (let row = 0; row < res; row++) {
+      for (let col = 0; col < res; col++) {
+        const idx = row * res + col;
+        if (!mask[idx]) continue;
+        const h = grid[idx];
+        let isMax = true;
+        for (let dr = -win; dr <= win && isMax; dr++) {
+          const r = row + dr;
+          if (r < 0 || r >= res) continue;
+          for (let dc = -win; dc <= win; dc++) {
+            if (!dr && !dc) continue;
+            const c = col + dc;
+            if (c < 0 || c >= res) continue;
+            if (grid[r * res + c] > h) { isMax = false; break; }
+          }
+        }
+        if (isMax) isPeak[idx] = 1;
+      }
+    }
+
+    let candidates = [];
+    for (let i = 0; i < n; i++) if (isPeak[i]) candidates.push(i);
+    candidates.sort((a, b) => grid[b] - grid[a]); // tallest first, so suppression favors real summits
+
+    const kept = [];
+    const minSep2 = (win * 1.5) * (win * 1.5);
+    for (const idx of candidates) {
+      const row = (idx / res) | 0, col = idx % res;
+      let ok = true;
+      for (let k = 0; k < kept.length; k++) {
+        const dr = row - kept[k].row, dc = col - kept[k].col;
+        if (dr * dr + dc * dc < minSep2) { ok = false; break; }
+      }
+      if (ok) kept.push({ row, col, idx, h: grid[idx] });
+    }
+    if (kept.length === 0) return grid; // no peaks above threshold — nothing to symmetrize
+
+    // Multi-source BFS (watershed): every masked cell gets claimed by whichever peak reaches it
+    // first, and its flood-fill step count becomes its "distance" for the falloff below.
+    const owner = new Int32Array(n).fill(-1);
+    const dist = new Float32Array(n).fill(Infinity);
+    const qr = new Int32Array(n), qc = new Int32Array(n), qOwner = new Int32Array(n);
+    let qHead = 0, qTail = 0;
+    kept.forEach((p, pi) => {
+      owner[p.idx] = pi; dist[p.idx] = 0;
+      qr[qTail] = p.row; qc[qTail] = p.col; qOwner[qTail] = pi; qTail++;
+    });
+    const DR = [1, -1, 0, 0], DC = [0, 0, 1, -1];
+    while (qHead < qTail) {
+      const row = qr[qHead], col = qc[qHead], pi = qOwner[qHead];
+      const d = dist[row * res + col];
+      qHead++;
+      for (let k = 0; k < 4; k++) {
+        const r = row + DR[k], c = col + DC[k];
+        if (r < 0 || r >= res || c < 0 || c >= res) continue;
+        const nIdx = r * res + c;
+        if (!mask[nIdx]) continue;
+        const nd = d + 1;
+        if (nd < dist[nIdx]) {
+          dist[nIdx] = nd; owner[nIdx] = pi;
+          qr[qTail] = r; qc[qTail] = c; qOwner[qTail] = pi; qTail++;
+        }
+      }
+    }
+
+    const maxDist = new Float32Array(kept.length).fill(1);
+    for (let i = 0; i < n; i++) {
+      const pi = owner[i];
+      if (pi >= 0 && dist[i] > maxDist[pi]) maxDist[pi] = dist[i];
+    }
+
+    const out = grid.slice();
+    for (let i = 0; i < n; i++) {
+      const pi = owner[i];
+      if (pi < 0) continue; // below threshold — leave valleys/rivers/flats exactly as they were
+      const r = maxDist[pi];
+      const t = r > 0 ? Math.min(1, dist[i] / r) : 0;
+      const falloff = Math.cos(t * Math.PI * 0.5); // 1 at the true peak, 0 at the mountain's own edge
+      const symH = cutoff + (kept[pi].h - cutoff) * falloff;
+      out[i] = grid[i] * (1 - blendT) + symH * blendT;
+    }
+    return out;
+  }
+
   // Rebuilds the ground's vertex heights from terrainHeightmapImg at the CURRENT resolution
   // (TERRAIN_SEG), height scale, and smoothness. Called on first upload, and again whenever the
   // Terrain Height / Resolution / Smoothness controls change, without needing to re-upload.
@@ -7526,8 +7652,11 @@
     const res = TERRAIN_SEG + 1;
     const smoothKey = Math.max(0, Math.round(terrainHeightmapSmoothness));
     const sharpKey = Math.max(1, Math.round(terrainHeightmapFeatureSharpness));
+    const symKey = !!terrainHeightmapSymmetrize;
+    const threshKey = Math.max(0, Math.min(100, Math.round(terrainHeightmapPeakThreshold)));
+    const blendKey = Math.max(0, Math.min(100, Math.round(terrainHeightmapSymmetrizeBlend)));
     let grid, gMin, gMax;
-    if (_hmGridCache.img === terrainHeightmapImg && _hmGridCache.res === res && _hmGridCache.smoothness === smoothKey && _hmGridCache.sharpness === sharpKey && _hmGridCache.grid) {
+    if (_hmGridCache.img === terrainHeightmapImg && _hmGridCache.res === res && _hmGridCache.smoothness === smoothKey && _hmGridCache.sharpness === sharpKey && _hmGridCache.sym === symKey && _hmGridCache.thresh === threshKey && _hmGridCache.blend === blendKey && _hmGridCache.grid) {
       // Same image, same resolution, same smoothness/sharpness as last time — only Height/Base/
       // Contrast/Invert/Normalize moved, so reuse the already-resampled/blurred grid (and its cached
       // min/max) instead of redoing that work on this tick.
@@ -7577,7 +7706,16 @@
       }
       gMin = Infinity; gMax = -Infinity;
       for (let i = 0; i < res * res; i++) { if (grid[i] < gMin) gMin = grid[i]; if (grid[i] > gMax) gMax = grid[i]; }
-      _hmGridCache = { img: terrainHeightmapImg, res: res, smoothness: smoothKey, sharpness: sharpKey, grid: grid, gMin: gMin, gMax: gMax };
+
+      if (symKey) {
+        grid = symmetrizePeaksGrid(grid, res, gMin, gMax, threshKey / 100, blendKey / 100);
+        // Re-measure min/max on the rebuilt grid so Normalize/Contrast downstream still stretch
+        // against the actual current data range, not the pre-symmetrize one.
+        gMin = Infinity; gMax = -Infinity;
+        for (let i = 0; i < res * res; i++) { if (grid[i] < gMin) gMin = grid[i]; if (grid[i] > gMax) gMax = grid[i]; }
+      }
+
+      _hmGridCache = { img: terrainHeightmapImg, res: res, smoothness: smoothKey, sharpness: sharpKey, sym: symKey, thresh: threshKey, blend: blendKey, grid: grid, gMin: gMin, gMax: gMax };
     }
 
     if (!opts.skipUndo) terrainSaveUndo();
@@ -13781,6 +13919,39 @@
       refreshUI();
     };
     rowInvert.appendChild(bInvert); container.appendChild(rowInvert);
+
+    // "Symmetrize Peaks" — for heightmaps that came from a shaded-relief/hillshade image rather than
+    // pure elevation data, where every mountain leans toward its brighter/lit side. Turning this on
+    // finds each mountain's real peak and rebuilds it as a centered, symmetric dome.
+    const rowSym = mkRow('Symmetrize Peaks (fix tilted mountains)');
+    const bSym = document.createElement('button');
+    bSym.className = 'btn' + (terrainHeightmapSymmetrize ? ' primary' : '');
+    bSym.style.cssText = 'flex:1;';
+    bSym.textContent = terrainHeightmapSymmetrize ? 'On — mountains centered' : 'Off — use image as-is';
+    bSym.onclick = () => {
+      terrainHeightmapSymmetrize = !terrainHeightmapSymmetrize;
+      warnIfOverwritingSculpt();
+      applyHeightmapToTerrain({ skipUndo: true });
+      refreshUI();
+    };
+    rowSym.appendChild(bSym); container.appendChild(rowSym);
+
+    const sPeakThresh = mkSlider(10, 90, 1, terrainHeightmapPeakThreshold, (v) => {
+      terrainHeightmapPeakThreshold = v;
+      warnIfOverwritingSculpt();
+      applyHeightmapToTerrain({ skipUndo: true });
+    }, (v) => Math.round(v) + '%');
+
+    const sPeakBlend = mkSlider(0, 100, 5, terrainHeightmapSymmetrizeBlend, (v) => {
+      terrainHeightmapSymmetrizeBlend = v;
+      warnIfOverwritingSculpt();
+      applyHeightmapToTerrain({ skipUndo: true });
+    }, (v) => Math.round(v) + '%');
+
+    container.appendChild(mkFieldGrid([
+      mkField('🎯', 'Peak threshold', sPeakThresh),
+      mkField('🔁', 'Symmetry amount', sPeakBlend),
+    ]));
   }
 
   function buildErosionTab() {
