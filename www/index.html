@@ -11300,6 +11300,22 @@
 
   async function downloadDataUrl(dataUrl, filename) {
     const isNative = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
+    // BUGFIX (silent no-op export in the packaged APK — "a message pops up but nothing else
+    // happens, no share sheet, no download"): this used to be `if (isNative && ...Filesystem)`,
+    // so when running as a real packaged app but the Filesystem plugin somehow isn't registered
+    // on the native side (plugin didn't sync into android/ at build time), the condition was just
+    // false and execution fell all the way through to the plain `<a download>` trick at the
+    // bottom of this function. That trick is a guaranteed silent no-op inside a Capacitor
+    // WebView — no error, no toast, nothing — which is indistinguishable from "it's just hanging"
+    // to the person using the app. Splitting the check so a native build with a missing plugin
+    // gets its OWN loud, specific error (and never reaches the `<a>` fallback) turns that silent
+    // failure into something actually debuggable.
+    if (isNative && (!Capacitor.Plugins || !Capacitor.Plugins.Filesystem)) {
+      const avail = (window.Capacitor && Capacitor.Plugins) ? Object.keys(Capacitor.Plugins).join(', ') : '(none)';
+      toast('Export failed: the Filesystem plugin isn\'t available in this build (plugins found: ' + avail + '). This APK needs to be rebuilt — @capacitor/filesystem did not sync into the native project.', 7000);
+      console.error('Capacitor native platform detected but Plugins.Filesystem is missing. Plugins present:', avail);
+      return;
+    }
     if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
       let blob;
       try {
