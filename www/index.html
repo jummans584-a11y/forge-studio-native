@@ -11328,9 +11328,17 @@
       // save/share code below will report its own success or failure shortly after this.
     }, 900);
     if (isNative && (!Capacitor.Plugins || !Capacitor.Plugins.Filesystem)) {
-      return;
-    }
-    if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
+      // LAST-RESORT FALLBACK (requested): the Filesystem plugin is supposed to always be
+      // present in a correctly-built APK — see the "Verify Filesystem/Share plugins" step in
+      // build-apk.yml, which fails the whole build red if it isn't wired in. So landing here
+      // means either (a) the APK on the phone is an OLD build from before that fix, or (b) this
+      // particular WebView build genuinely has no Filesystem plugin for some other reason.
+      // Either way, rather than give up silently, fall through to the plain `<a download>` trick
+      // below. It is NOT guaranteed to work inside a packaged WebView (some Android WebViews have
+      // no download handler registered at all, so this can still be a no-op) — but it's strictly
+      // better than doing nothing, and costs nothing to try.
+      toast('Filesystem plugin missing — trying a direct browser-style download as a fallback…', 3500);
+    } else if (isNative && Capacitor.Plugins && Capacitor.Plugins.Filesystem) {
       let blob;
       try {
         const resp = await fetch(dataUrl); // works for both data: and blob: URLs
