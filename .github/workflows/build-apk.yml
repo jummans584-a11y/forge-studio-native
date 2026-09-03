@@ -40,9 +40,10 @@ jobs:
           curl -sSL -o www/vendor/three.min.js https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js
           curl -sSL -o www/vendor/OrbitControls.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js
           curl -sSL -o www/vendor/TransformControls.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js
-          curl -sSL -o www/vendor/fflate.js https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js
+          curl -sSL -o www/vendor/fflate.js https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js
           curl -sSL -o www/vendor/FBXLoader.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js
           curl -sSL -o www/vendor/GLTFLoader.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js
+          curl -sSL -o www/vendor/OBJLoader.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js
           curl -sSL -o www/vendor/GLTFExporter.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js
           curl -sSL -o www/vendor/OBJExporter.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js
           curl -sSL -o www/vendor/BufferGeometryUtils.js https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js
@@ -57,6 +58,41 @@ jobs:
 
       - name: Sync web assets into Android project
         run: npx cap sync android
+
+      - name: Verify Filesystem/Share plugins actually synced into the native project
+        run: |
+          set -e
+          echo "---- capacitor.plugins.json (what the native Bridge reads at runtime) ----"
+          cat android/app/src/main/assets/capacitor.plugins.json || { echo "::error::capacitor.plugins.json not found — cap sync did not run correctly."; exit 1; }
+          echo ""
+          echo "---- capacitor.settings.gradle (what actually gets compiled into the APK) ----"
+          cat android/capacitor.settings.gradle || { echo "::error::capacitor.settings.gradle not found."; exit 1; }
+          echo ""
+          # Checking capacitor.plugins.json alone isn't enough — a previous version of this check
+          # only grepped the text output of `npx cap ls`, which matched even when the plugin was
+          # merely *detected* in node_modules but never actually wired into the native Android
+          # build. These two files are the real source of truth: capacitor.plugins.json is what
+          # the Bridge reads to instantiate plugins at runtime, and capacitor.settings.gradle is
+          # what tells Gradle to actually compile the plugin's native code into the APK at all. If
+          # either is missing the plugin, Capacitor.Plugins.Filesystem will be undefined on-device
+          # even though the build "succeeds".
+          if ! grep -q "FilesystemPlugin\|capacitor-filesystem" android/app/src/main/assets/capacitor.plugins.json; then
+            echo "::error::Filesystem is missing from capacitor.plugins.json — Capacitor.Plugins.Filesystem WILL be undefined at runtime. Export/save will silently fail."
+            exit 1
+          fi
+          if ! grep -q "SharePlugin\|capacitor-share" android/app/src/main/assets/capacitor.plugins.json; then
+            echo "::error::Share is missing from capacitor.plugins.json — Capacitor.Plugins.Share WILL be undefined at runtime."
+            exit 1
+          fi
+          if ! grep -q "capacitor-filesystem" android/capacitor.settings.gradle; then
+            echo "::error::capacitor-filesystem is not included in capacitor.settings.gradle — its native code was never compiled into the APK."
+            exit 1
+          fi
+          if ! grep -q "capacitor-share" android/capacitor.settings.gradle; then
+            echo "::error::capacitor-share is not included in capacitor.settings.gradle — its native code was never compiled into the APK."
+            exit 1
+          fi
+          echo "Filesystem and Share are both properly wired into the native Android project."
 
       - name: Add AdMob App ID to AndroidManifest.xml
         run: |
