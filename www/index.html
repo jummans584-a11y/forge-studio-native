@@ -55,6 +55,29 @@
     --font-display: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
+  /* ---------- Light theme ---------- */
+  /* Applied by setting data-theme="light" on <html> (see THEME_PRESETS / applyThemeMode in the
+     main script, and the tiny inline script right after this style block that applies the saved
+     choice before first paint so there's no dark-then-light flash on load). Every button/panel
+     already reads these same tokens (--bg, --panel*, --ink*, --line*), so flipping just these
+     values here re-themes the entire app with no other CSS changes needed anywhere else. */
+  html[data-theme="light"] {
+    --bg: #eef0f4;
+    --panel: #ffffff;
+    --panel-2: #f3f4f7;
+    --panel-3: #e6e8ed;
+    --line: #d8dae0;
+    --line-soft: #e6e8ed;
+    --line-hi: rgba(0,0,0,0.05);
+    --ink: #1c1e24;
+    --ink-dim: #5c606a;
+    --ink-faint: #8a8e97;
+    --gloss-hi: rgba(255,255,255,0.7);
+    --shadow-xs: 0 1px 2px rgba(20,20,30,0.08);
+    --shadow-sm: 0 3px 10px rgba(20,20,30,0.10), 0 1px 2px rgba(20,20,30,0.08);
+    --shadow-md: 0 8px 24px rgba(20,20,30,0.14), 0 2px 6px rgba(20,20,30,0.10);
+    --shadow-lg: 0 -14px 38px rgba(20,20,30,0.16);
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
@@ -79,14 +102,14 @@
 
   #topbar {
     position: absolute; top: 0; left: 0; right: 0;
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 7px 10px;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 4px 7px;
     background: linear-gradient(to bottom, rgba(22,23,26,0.94), rgba(22,23,26,0));
     z-index: 10;
     pointer-events: none;
   }
   #topbar * { pointer-events: auto; }
-  .title { font-size: 12px; letter-spacing: 0.03em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title { font-size: 9.5px; letter-spacing: 0.03em; color: var(--ink-dim); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .title b { color: var(--ink); font-weight: 600; }
   /* The topbar's icon buttons (undo/redo/projects/library/lighting/exposure/wireframe/snapshot/
      reset-view) used to just sit in the same nowrap flex row as the workspace tabs and title —
@@ -96,7 +119,7 @@
      own (same pattern as .tabchips below) so every button stays reachable with a swipe, and
      min-width:0 is what lets it actually shrink to fit instead of pushing the topbar wider than
      the screen. */
-  #topbar-tools { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex-shrink: 1; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding: 2px 1px; }
+  #topbar-tools { display: flex; gap: 4px; overflow-x: auto; min-width: 0; flex-shrink: 1; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding: 1px; }
   #topbar-tools .iconbtn { scroll-snap-align: end; }
   /* On narrow phone screens the "📁 Untitled project" name label was eating space the undo/redo/
      other icon buttons needed, forcing them to crowd or scroll. The project name is still visible
@@ -106,15 +129,15 @@
     #project-name-wrap { display: none !important; }
   }
 
-  #workspace-tabs { display: flex; background: var(--panel-2); border-radius: var(--r-md); padding: 2px; gap: 2px; border: 1px solid var(--line); }
-  #workspace-tabs button { border: none; background: transparent; color: var(--ink-dim); padding: 6px 10px; border-radius: var(--r-sm); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
+  #workspace-tabs { display: flex; background: var(--panel-2); border-radius: var(--r-md); padding: 1px; gap: 1px; border: 1px solid var(--line); }
+  #workspace-tabs button { border: none; background: transparent; color: var(--ink-dim); padding: 3px 6px; border-radius: var(--r-sm); font-size: 9px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; white-space: nowrap; }
   #workspace-tabs button.active { background: var(--accent); color: #1a1005; box-shadow: 0 2px 8px var(--accent-glow); }
 
   .iconbtn {
-    width: 30px; height: 30px; border-radius: var(--r-sm); flex-shrink: 0;
+    width: 22px; height: 22px; border-radius: var(--r-sm); flex-shrink: 0;
     background: var(--panel-2); border: 1px solid var(--line);
     color: var(--ink); display: flex; align-items: center; justify-content: center;
-    font-size: 13px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    font-size: 10px; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
   }
   .iconbtn:active { background: var(--accent-dim); border-color: var(--accent); transform: scale(0.93); }
 
@@ -393,28 +416,9 @@
 
   /* Custom slider — the stock Android range input is a thin, hard-to-grab line with no visual
      weight, and it's the single most-used control in this app (every brush/terrain/paint
-     parameter runs through one). A wider track + a distinct glowing thumb gives it presence and
-     a bigger, easier touch target without changing any of the underlying <input> wiring — every
-     existing oninput/onchange handler keeps working untouched. */
-  input[type=range] {
-    flex: 1; min-width: 0; -webkit-appearance: none; appearance: none;
-    height: 5px; border-radius: var(--r-pill); background: var(--panel-2);
-    outline: none; margin: 10px 0;
-  }
-  input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
-    background: var(--accent); border: 2px solid var(--panel); margin-top: -4.5px;
-    box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
-    transition: transform 0.12s ease;
-  }
-  input[type=range]:active::-webkit-slider-thumb { transform: scale(1.15); }
-  input[type=range]::-moz-range-track { height: 5px; border-radius: var(--r-pill); background: var(--panel-2); }
-  input[type=range]::-moz-range-thumb {
-    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
-    border: 2px solid var(--panel); box-shadow: 0 2px 8px var(--accent-glow); cursor: pointer;
-  }
-  input[type=range]:disabled::-webkit-slider-thumb { background: var(--ink-faint); box-shadow: none; }
+     parameter runs through one). The real, final slider look lives in the "DOCK REDESIGN" block
+     below (transparent track + glowing thumb) — this old block used to duplicate/fight with it
+     and got dropped in favor of that single definition. */
 
   .seg { display: flex; background: var(--panel-2); border-radius: var(--r-md); padding: 2px; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .seg button {
@@ -442,9 +446,14 @@
      property mkSlider() keeps in sync with the value) leading into a glowing "dot" thumb: a bright
      gradient core wrapped in a soft halo (layered box-shadow) that pulses gently so every slider in
      the app — the single most-used control here — reads as alive and premium, not a flat OS default. */
+  /* Colorful custom slider — proportional accent-orange fill up to the thumb (driven by the
+     --fill custom property mkSlider() keeps in sync with the value), plus a bigger, easier-to-grab
+     thumb than the default browser slider. Track is fully transparent behind the fill (crystal
+     clear, no dark/black fill box) with just a thin soft edge so it stays visible against the
+     panel — no black shadows anywhere on the control. */
   @keyframes sliderThumbGlow {
-    0%, 100% { box-shadow: 0 0 0 5px rgba(255,138,76,0.14), 0 0 10px 2px var(--accent-glow), 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.55); }
-    50%      { box-shadow: 0 0 0 7px rgba(255,138,76,0.20), 0 0 18px 5px var(--accent-glow), 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.55); }
+    0%, 100% { box-shadow: 0 0 0 5px rgba(255,138,76,0.16), 0 0 10px 2px var(--accent-glow), inset 0 1px 1px rgba(255,255,255,0.65); }
+    50%      { box-shadow: 0 0 0 7px rgba(255,138,76,0.24), 0 0 18px 5px var(--accent-glow), inset 0 1px 1px rgba(255,255,255,0.65); }
   }
   input[type="range"] {
     -webkit-appearance: none; appearance: none;
@@ -452,26 +461,26 @@
   }
   input[type="range"]::-webkit-slider-runnable-track {
     height: 6px; border-radius: var(--r-pill);
-    background: linear-gradient(to right, #ffb066 0%, var(--accent) var(--fill), var(--panel-3) var(--fill));
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.35);
+    background: linear-gradient(to right, #ffb066 0%, var(--accent) var(--fill), transparent var(--fill));
+    border: 1px solid var(--glass-edge-soft, var(--line));
   }
   input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 13px; height: 13px; margin-top: -3.5px;
-    border-radius: 50%; border: none;
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -4.5px;
+    border-radius: 50%; border: 2px solid #fff;
     background: radial-gradient(circle at 34% 30%, #fff 0%, var(--accent-2) 45%, var(--accent) 100%);
     animation: sliderThumbGlow 2.2s ease-in-out infinite;
     transition: transform 0.12s ease;
   }
   input[type="range"]:active::-webkit-slider-thumb, input[type="range"]:focus-visible::-webkit-slider-thumb { transform: scale(1.25); }
-  input[type="range"]::-moz-range-track { height: 6px; border-radius: var(--r-pill); background: var(--panel-3); box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: var(--r-pill); background: transparent; border: 1px solid var(--glass-edge-soft, var(--line)); }
   input[type="range"]::-moz-range-progress { height: 6px; border-radius: var(--r-pill); background: linear-gradient(to right, #ffb066, var(--accent)); }
   input[type="range"]::-moz-range-thumb {
-    width: 13px; height: 13px; border-radius: 50%; border: none;
+    width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff;
     background: radial-gradient(circle at 34% 30%, #fff 0%, var(--accent-2) 45%, var(--accent) 100%);
     animation: sliderThumbGlow 2.2s ease-in-out infinite;
   }
   input[type="range"]:disabled::-webkit-slider-thumb, input[type="range"]:disabled::-moz-range-thumb {
-    animation: none; background: var(--ink-faint); box-shadow: none;
+    animation: none; background: var(--ink-faint); border-color: var(--ink-faint); box-shadow: none;
   }
 
   /* Two sliders per row, each in its own small card — brings related controls (e.g. Mountain's
@@ -496,6 +505,40 @@
     width: 54px; font-size: 12px; text-align: right; background: var(--panel-2);
     border: 1px solid var(--accent); border-radius: 5px; color: var(--ink); padding: 1px 4px;
   }
+  /* Custom in-app numpad — replaces the native <input type=number> so tapping a slider's value
+     opens our own small keypad instead of the phone's full OS keyboard. No real text <input> is
+     ever focused, so the OS keyboard never has a reason to appear. */
+  .numpad-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9999;
+    display: flex; align-items: flex-end; justify-content: center;
+    animation: numpadFadeIn 0.15s ease;
+  }
+  @keyframes numpadFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .numpad {
+    width: 100%; max-width: 320px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: var(--shadow-lg);
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    animation: numpadSlideUp 0.18s ease;
+  }
+  @keyframes numpadSlideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+  .numpad-display {
+    font-size: 22px; font-weight: 700; color: var(--ink); text-align: right;
+    background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--r-md);
+    padding: 10px 14px; margin-bottom: 10px; letter-spacing: 0.02em;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .numpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .numpad-key {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md);
+    color: var(--ink); font-size: 17px; font-weight: 600; padding: 13px 0;
+    text-align: center; cursor: pointer; user-select: none;
+    transition: background 0.1s ease, transform 0.1s ease;
+  }
+  .numpad-key:active { background: var(--accent-dim); transform: scale(0.95); }
+  .numpad-key.fn { color: var(--ink-dim); font-size: 14px; }
+  .numpad-key.confirm { background: var(--accent); border-color: var(--accent); color: #1a1005; }
+  .numpad-key.confirm:active { background: var(--accent-3); }
+  .numpad-hint { font-size: 10px; color: var(--ink-faint); text-align: center; margin-top: 9px; }
   /* Small accent tick before every section label — a quiet, repeated signature that gives every
      tool panel (Sculpt, Paint, Vegetation, Export...) the same recognizable rhythm without any
      per-tool markup changes, since .sec-label is already used throughout. */
@@ -572,9 +615,9 @@
 
   #exposure-panel {
     position: absolute; top: 54px; right: 12px; z-index: 11;
-    background: rgba(30,32,36,0.96); border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--glass-panel-2); border: 1px solid var(--glass-edge-soft); border-radius: var(--r-md);
     padding: 10px 12px; display: none; align-items: center; gap: 10px;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--glass-inset);
   }
   #exposure-panel.show { display: flex; }
   #exposure-panel input[type=range] { width: 130px; }
@@ -583,7 +626,7 @@
   #statsbar {
     position: absolute; top: 54px; left: 12px; z-index: 9;
     background: rgba(30,32,36,0.82); border: 1px solid var(--line); border-radius: var(--r-sm);
-    padding: 6px 10px; font-size: 10.5px; color: var(--ink-dim); display: none; gap: 10px;
+    padding: 3px 6px; font-size: 8px; color: var(--ink-dim); display: none; gap: 6px;
     pointer-events: none; letter-spacing: 0.02em; backdrop-filter: blur(4px);
   }
   #statsbar.show { display: flex; }
@@ -1017,7 +1060,8 @@
   }
   #undoToast button.utbtn { background: var(--accent-grad); box-shadow: 0 2px 8px var(--accent-glow); }
 
-  #statsbar, #exposure-panel { backdrop-filter: blur(10px); box-shadow: var(--shadow-xs); }
+  #statsbar { backdrop-filter: blur(10px); box-shadow: var(--shadow-xs); }
+  #exposure-panel { -webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft); box-shadow: var(--glass-outer-glow), var(--glass-inset); }
   #gizmoBar, .vp-float-bar { backdrop-filter: blur(10px); box-shadow: var(--shadow-md), inset 0 1px 0 var(--line-hi); }
 
   /* Rim light along the dock sheet's top edge — a thin warm hairline that sells "glass panel
@@ -1035,7 +1079,341 @@
   #empty-state h1 { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.01em; }
 
   .catdot { box-shadow: 0 0 0 2px rgba(0,0,0,0.25), 0 0 6px currentColor; }
+  /* ============================================================
+     FROSTED GLASS UI SKIN
+     Turns every panel/dock/bar/button surface into translucent glass:
+     background blur (backdrop-filter) + semi-transparent fill + a soft
+     gold edge-glow + an inner highlight/shadow pair for 3D "floating
+     glass sheet" depth. Everything below is additive on top of the
+     existing rules above — no layout, no JS, no element removed.
+  ============================================================ */
+  :root {
+    /* Glass fills — pulled back down ~50% from the previous pass on request,
+       so more of the actual terrain/map behind each panel reads through
+       clearly. Edge glow + inner highlight below are kept strong so the
+       panel still reads as glass and not just "nothing there" once the
+       fill is this light. */
+    --glass-panel: rgba(28, 30, 36, 0.21);
+    --glass-panel-2: rgba(36, 38, 46, 0.17);
+    --glass-panel-3: rgba(46, 49, 58, 0.15);
+    --glass-topbar: rgba(20, 21, 25, 0.17);
+    /* Gold edge — a warmer, brighter line than the old flat --line, used
+       for the "metallic glow rim" that separates glass from background.
+       Brightened up from the first pass, which was too faint to read as a
+       rim at all once photographed/compressed on a real device. */
+    --glass-edge: rgba(255, 197, 122, 0.6);
+    --glass-edge-soft: rgba(255, 197, 122, 0.34);
+    --glass-edge-bright: rgba(255, 214, 158, 0.85);
+    /* Blur + saturation pushed up further — with the fill this light, the
+       blur is doing most of the work of making the panel read as glass
+       rather than empty space, so it's raised again to compensate. */
+    --glass-blur: blur(34px) saturate(190%);
+    --glass-blur-soft: blur(24px) saturate(170%);
+    /* Inner highlight (top) + inner shadow (bottom) = convex glass depth.
+       Highlight brightened so every panel/button visibly catches light
+       along its top edge — the single strongest "this is glass, not a flat
+       button" cue at a glance. */
+    --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.28),
+                    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+                    inset 0 0 24px rgba(255, 197, 122, 0.06);
+    --glass-outer-glow: 0 0 0 1px var(--glass-edge-soft), 0 8px 28px rgba(0,0,0,0.4);
+  }
+  html[data-theme="light"] {
+    --glass-panel: rgba(255, 255, 255, 0.21);
+    --glass-panel-2: rgba(243, 244, 247, 0.19);
+    --glass-panel-3: rgba(230, 232, 237, 0.17);
+    --glass-topbar: rgba(255, 255, 255, 0.19);
+    --glass-edge: rgba(214, 158, 74, 0.55);
+    --glass-edge-soft: rgba(214, 158, 74, 0.34);
+    --glass-edge-bright: rgba(214, 158, 74, 0.75);
+    --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.65),
+                    inset 0 -1px 0 rgba(20, 20, 30, 0.1),
+                    inset 0 0 24px rgba(214, 158, 74, 0.07);
+  }
+  /* Fallback for WebViews/browsers that don't support backdrop-filter at all
+     (older Android System WebView, some in-app browsers): without blur, a
+     low-alpha panel over a busy scene just looks like a dim flat rectangle
+     with no "glass" read at all. Bump every fill's opacity substantially in
+     that case so the panels stay clearly readable as distinct glass sheets
+     purely from fill + edge + sheen, with no blur to lean on — this fallback
+     tier is intentionally kept more opaque than the main one above, since
+     it has no blur at all to fall back on. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+      --glass-panel: rgba(28, 30, 36, 0.55);
+      --glass-panel-2: rgba(36, 38, 46, 0.5);
+      --glass-panel-3: rgba(46, 49, 58, 0.48);
+      --glass-topbar: rgba(20, 21, 25, 0.49);
+    }
+    html[data-theme="light"] {
+      --glass-panel: rgba(255, 255, 255, 0.56);
+      --glass-panel-2: rgba(243, 244, 247, 0.53);
+      --glass-panel-3: rgba(230, 232, 237, 0.5);
+      --glass-topbar: rgba(255, 255, 255, 0.55);
+    }
+  }
+
+
+  /* Main containers: bottom sheet, floating tool bars, gizmo bar, topbar,
+     workspace tabs, block-preview bar — every "panel" surface in the app. */
+  #dock-sheet,
+  #gizmoBar,
+  .vp-float-bar,
+  #block-preview-bar,
+  #workspace-tabs,
+  #sculptCommandCenter,
+  .sculpt-command-center {
+    background: var(--glass-panel) !important;
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    border-color: var(--glass-edge) !important;
+    box-shadow: var(--glass-outer-glow), var(--glass-inset) !important;
+  }
+  #topbar {
+    background: linear-gradient(to bottom, var(--glass-topbar), rgba(20,21,25,0));
+    -webkit-backdrop-filter: var(--glass-blur-soft);
+    backdrop-filter: var(--glass-blur-soft);
+  }
+
+  /* Buttons and secondary chips that live OUTSIDE the scrolling dock
+     (floating gizmo/viewport bars) — these never move under the user's
+     finger, so their own backdrop-filter is cheap and safe. */
+  #gizmoBar button,
+  .vp-float-bar button,
+  .vp-bar-handle {
+    background: var(--glass-panel-2) !important;
+    -webkit-backdrop-filter: var(--glass-blur-soft);
+    backdrop-filter: var(--glass-blur-soft);
+    border-color: var(--glass-edge-soft) !important;
+    box-shadow: var(--glass-inset);
+  }
+  /* Active / selected states keep the warm accent fill but pick up a
+     brighter gold rim so "on" state still reads as glowing glass, not flat. */
+  #workspace-tabs button.active,
+  #gizmoBar button.active,
+  .vp-float-bar button.active,
+  .btn.primary {
+    box-shadow: 0 2px 10px var(--accent-glow), var(--glass-inset) !important;
+    border-color: var(--glass-edge-bright) !important;
+  }
+
+  /* FLICKER FIX: everything below (.iconbtn, .btn, .seg, sliders, dock
+     cards, toolbar chips…) lives INSIDE #dock, which scrolls (overflow-y:
+     auto). Giving each of these its own backdrop-filter meant every one
+     of them had to re-sample and re-blur what's behind it on every
+     scroll frame — that's what caused the blink/flash while dragging the
+     panel up/down on Android's WebView. Fix: no backdrop-filter at all
+     on anything inside the scroll area — just a flat translucent fill
+     (still reads as glass since it sits on the already-blurred sheet
+     behind it), so scrolling repaints instantly with nothing to
+     recompute. Blur stays only on the outer static bars above. */
+  .iconbtn,
+  .btn,
+  .seg,
+  .seg button,
+  .field,
+  #dock input:not([type="range"]),
+  #dock select,
+  #dock .card,
+  #dock .tool-card,
+  #dock .grid-item,
+  #dock-mode-bar,
+  #dock-content-col > * {
+    background: var(--glass-panel-2) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    border-color: var(--glass-edge-soft) !important;
+  }
+  /* .field cards (the little icon+label+slider tiles every tool panel is built from — Mountain's
+     Height/Strength/Width, Vegetation's Density/Spacing, etc.) still carried their old solid
+     opaque panel background + flat grey inset highlight from before the glass pass, so they sat
+     as flat opaque boxes against every translucent glass surface around them — this is what made
+     the theme read as broken/inconsistent. Bringing them fully onto the glass token set (fill via
+     the rule above, border/inset/glow here) makes every slider's own card match the rest of the
+     glass UI exactly. */
+  .field {
+    border: 1px solid var(--glass-edge-soft) !important;
+    box-shadow: var(--glass-inset) !important;
+  }
+  /* Sliders stay crystal-clear (no glass/dark fill box behind them) — only their own track/thumb
+     (styled above) should be visible, never a solid or translucent rectangle around them. */
+  #dock input[type="range"] {
+    background: transparent !important;
+    border-color: transparent !important;
+  }
+  .iconbtn, .btn {
+    box-shadow: var(--glass-inset);
+  }
+  .seg button.active {
+    box-shadow: 0 2px 10px var(--accent-glow), var(--glass-inset) !important;
+    border-color: var(--glass-edge-bright) !important;
+  }
+
+  /* "More tools" pill — pushed noticeably more transparent than the rest
+     (per request) and given a soft gold sheen so it reads as a highlighted
+     call-to-action rather than a plain row of text. No blur (see flicker
+     fix above — it lives inside the scrolling dock). */
+  .toolbar-more-toggle {
+    margin-top: 2px;
+    padding: 8px 10px;
+    border-radius: var(--r-md);
+    background: rgba(255, 197, 122, 0.03) !important;
+    border: 1px solid var(--glass-edge);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 16px rgba(255,197,122,0.04);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .toolbar-more-toggle:active { background: rgba(255, 197, 122, 0.08) !important; }
+  .toolbar-more-toggle span:first-child {
+    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    font-weight: 700;
+  }
+  .toolbar-more-toggle .chev { color: var(--accent-2); }
+
+  /* Premium "metal ring" — a bright conic-gradient hairline (like a
+     brushed-gold bezel) wrapped around the buttons that should stand out
+     as premium: the active primary tool icon, active segmented choice,
+     and active workspace tab. Implemented as a padding-box/border-box
+     double background so it works without an extra wrapper element. */
+  .toolbar-primary button.active,
+  .tabchip.active,
+  #workspace-tabs button.active {
+    position: relative;
+    border: 1px solid transparent !important;
+    background:
+      linear-gradient(var(--glass-panel-2), var(--glass-panel-2)) padding-box,
+      conic-gradient(from 180deg, #fff3d6, #d99a44, #ffe6b0, #b97a2e, #fff3d6) border-box !important;
+  }
+  .toolbar-primary button.active {
+    box-shadow: 0 2px 10px var(--accent-glow), var(--glass-inset);
+  }
+
+  /* Sculpt Command Center toggle bar — the pill switch shown in the
+     mock: gold-rimmed glass strip with a bright gold gliding thumb.
+     Kept blur-free too, since it also sits inside the scrolling dock. */
+  #dock-sheet .cmd-center-row,
+  [class*="command-center"],
+  [id*="command-center"],
+  [id*="commandCenter"] {
+    background: var(--glass-panel-2) !important;
+    border: 1px solid var(--glass-edge) !important;
+    box-shadow: var(--glass-inset), 0 0 14px var(--accent-glow) !important;
+  }
+
+  /* Drag handle pill on the sheet gets a faint gold glow to match the
+     metallic-edge theme instead of the old flat grey line. */
+  #dock-handle-bar { background: var(--glass-edge); box-shadow: 0 0 6px var(--glass-edge-soft); }
+
+  /* Promote the static outer panels to their own GPU compositing layer.
+     This keeps their (still-blurred) backdrop-filter stable and isolated
+     from the #dock scroll happening beneath/inside them, which is the
+     other half of the anti-flicker fix — the browser no longer has to
+     re-composite the whole panel stack on every scroll tick. */
+  #dock-sheet, #gizmoBar, .vp-float-bar, #block-preview-bar {
+    isolation: isolate;
+    transform: translateZ(0);
+    will-change: transform;
+    contain: layout style paint;
+  }
+  /* The scrolling content itself also gets its own layer so its repaints
+     never bleed into (or fight with) the blurred sheet chrome around it. */
+  #dock {
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+
+  /* ------------------------------------------------------------
+     LATE OVERRIDES: a second "premium gloss" pass elsewhere in this
+     stylesheet re-declares solid/near-opaque backgrounds for several of
+     the same elements (topbar, dock-sheet, buttons/chips) *after* the
+     glass rules above, so those solid backgrounds were winning the
+     cascade and quietly undoing the glass look on those elements. This
+     block is placed at the very end of <style> on purpose so it always
+     has the final say, restoring true glass everywhere black/opaque
+     panels were showing through.
+  ------------------------------------------------------------ */
+  #topbar {
+    background: linear-gradient(to bottom, var(--glass-topbar), rgba(20,21,25,0)) !important;
+    -webkit-backdrop-filter: var(--glass-blur-soft) !important;
+    backdrop-filter: var(--glass-blur-soft) !important;
+  }
+  #dock-sheet {
+    background: var(--glass-panel) !important;
+    -webkit-backdrop-filter: var(--glass-blur) !important;
+    backdrop-filter: var(--glass-blur) !important;
+    box-shadow: var(--glass-outer-glow), var(--glass-inset) !important;
+  }
+  .iconbtn, .toolbar-primary button, .toolbar-secondary button, .tabchip, .catchip,
+  #assetLibraryFilters button, .settings-row button, .proj-actions button,
+  #gizmoBar button, .vp-float-bar button, .seg button {
+    background: var(--glass-panel-2) !important;
+    border-color: var(--glass-edge-soft) !important;
+  }
+  #gizmoBar button, .vp-float-bar button {
+    -webkit-backdrop-filter: var(--glass-blur-soft) !important;
+    backdrop-filter: var(--glass-blur-soft) !important;
+  }
+  .iconbtn, .toolbar-primary button, .toolbar-secondary button, .tabchip, .catchip,
+  #assetLibraryFilters button, .settings-row button, .proj-actions button, .seg button {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Full-screen modal scrims (compare, asset library, projects, settings,
+     variant prompt) were solid near-black (0.7–0.94 alpha) — dropped to
+     the same glass tint as the rest of the app, with blur kept/raised
+     so modal content stays legible over the 3D scene showing through. */
+  #compareModal,
+  #assetLibraryModal,
+  #projectsModal,
+  #settingsModal {
+    background: var(--glass-panel) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+    backdrop-filter: blur(20px) saturate(160%) !important;
+  }
+  #assetVariantPrompt {
+    background: rgba(10,10,12,0.28) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(150%) !important;
+    backdrop-filter: blur(14px) saturate(150%) !important;
+  }
+  #empty-state[style*="background"],
+  #settingsBox,
+  #homeRecentEmpty {
+    background: var(--glass-panel-2) !important;
+  }
+
 </style>
+<script>
+  // Applies the saved theme mode + accent color to <html> before the body paints, so there's no
+  // flash of the default dark/orange look on load for someone who picked light mode / a different
+  // accent in Settings. ACCENT_PRESETS is intentionally duplicated (also defined in the main
+  // script below) since this tiny pre-paint pass has to run standalone, before the rest of the
+  // app's code has loaded.
+  (function () {
+    try {
+      var ACCENT_PRESETS = {
+        orange: { a: '#ff8a4c', a2: '#ffc98a', a3: '#e2632a', dim: '#5a3a2b', glow: 'rgba(255,138,76,0.35)', grad: 'linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08))' },
+        blue: { a: '#4c9aff', a2: '#8ac2ff', a3: '#2a63e2', dim: '#2b3a5a', glow: 'rgba(76,154,255,0.35)', grad: 'linear-gradient(135deg, #6cb2ff 0%, #3d84ff 55%, #2a63e2 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,166,255,0.16), rgba(42,99,226,0.08))' },
+        green: { a: '#52d18a', a2: '#96e8bb', a3: '#2a9e5c', dim: '#254a35', glow: 'rgba(82,209,138,0.35)', grad: 'linear-gradient(135deg, #78e0a6 0%, #45c67f 55%, #2a9e5c 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,224,166,0.16), rgba(42,158,92,0.08))' },
+        purple: { a: '#b083ff', a2: '#d6bbff', a3: '#7c3fe2', dim: '#3a2b5a', glow: 'rgba(176,131,255,0.35)', grad: 'linear-gradient(135deg, #c8a4ff 0%, #a56aff 55%, #7c3fe2 100%)', gradsoft: 'linear-gradient(135deg, rgba(198,164,255,0.16), rgba(124,63,226,0.08))' },
+        red: { a: '#ff6363', a2: '#ffa3a3', a3: '#d92c2c', dim: '#5a2b2b', glow: 'rgba(255,99,99,0.35)', grad: 'linear-gradient(135deg, #ff8a8a 0%, #ff5252 55%, #d92c2c 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,138,138,0.16), rgba(217,44,44,0.08))' },
+        teal: { a: '#3ed6c4', a2: '#8aeee2', a3: '#1f9e8f', dim: '#254a46', glow: 'rgba(62,214,196,0.35)', grad: 'linear-gradient(135deg, #6ee6d8 0%, #33c4b1 55%, #1f9e8f 100%)', gradsoft: 'linear-gradient(135deg, rgba(110,230,216,0.16), rgba(31,158,143,0.08))' }
+      };
+      var mode = localStorage.getItem('themeMode') || 'dark';
+      var accentName = localStorage.getItem('themeAccent') || 'orange';
+      if (mode === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      var p = ACCENT_PRESETS[accentName] || ACCENT_PRESETS.orange;
+      var root = document.documentElement.style;
+      root.setProperty('--accent', p.a);
+      root.setProperty('--accent-2', p.a2);
+      root.setProperty('--accent-3', p.a3);
+      root.setProperty('--accent-dim', p.dim);
+      root.setProperty('--accent-glow', p.glow);
+      root.setProperty('--accent-grad', p.grad);
+      root.setProperty('--accent-grad-soft', p.gradsoft);
+    } catch (e) { /* private mode / storage unavailable — just falls back to the default look */ }
+  })();
+</script>
 </head>
 <body>
 <div id="app">
@@ -1076,6 +1454,23 @@
           <b>Storage used</b>
           <span id="settingsStorageInfo">Checking…</span>
         </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-text">
+          <b>Appearance</b>
+          <span>Dark or light look — applies everywhere, right away.</span>
+        </div>
+        <div class="seg" id="themeModeSeg" style="max-width:150px;">
+          <button data-mode="dark">Dark</button>
+          <button data-mode="light">Light</button>
+        </div>
+      </div>
+      <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div class="settings-row-text">
+          <b>Accent color</b>
+          <span>The highlight color used on active tabs, buttons and sliders across the whole app.</span>
+        </div>
+        <div id="accentSwatches" style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0;"></div>
       </div>
       <div class="settings-row">
         <div class="settings-row-text">
@@ -1281,6 +1676,7 @@
       <button class="iconbtn" id="btn-wireframe" title="Toggle wireframe">◻</button>
       <button class="iconbtn" id="btn-snapshot" title="Save snapshot">📷</button>
       <button class="iconbtn" id="btn-reset-view" title="Reset view">⤢</button>
+      <button class="iconbtn" id="btn-theme" title="Appearance — theme &amp; accent color">🎨</button>
     </div>
   </div>
 
@@ -1338,17 +1734,17 @@
      If you'd rather ship these as local files (fully offline vendor/ folder), download each URL
      below and save it under ./vendor/ with the same filename, then switch these src= back to
      ./vendor/<file>.js — no other code changes needed. -->
-<script src="./vendor/three.min.js"></script>
-<script src="./vendor/OrbitControls.js"></script>
-<script src="./vendor/TransformControls.js"></script>
-<script src="./vendor/fflate.js"></script>
-<script src="./vendor/FBXLoader.js"></script>
-<script src="./vendor/GLTFLoader.js"></script>
-<script src="./vendor/OBJLoader.js"></script>
-<script src="./vendor/GLTFExporter.js"></script>
-<script src="./vendor/OBJExporter.js"></script>
-<script src="./vendor/BufferGeometryUtils.js"></script>
-<script src="./vendor/SimplifyModifier.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/modifiers/SimplifyModifier.js"></script>
 <script>
 (function () {
   const canvas = document.getElementById('three');
@@ -6191,6 +6587,7 @@
   document.getElementById('homeSeeAllBtn').onclick = () => { hideHomeScreen(); openProjectsModal(); };
   document.getElementById('homeAssetLibBtn').onclick = () => { hideHomeScreen(); openAssetPicker(null); };
   document.getElementById('homeSettingsBtn').onclick = () => openSettingsModal();
+  document.getElementById('btn-theme').onclick = () => openSettingsModal();
 
   // ============================================================
   // SETTINGS — a small on-device panel. Every control here maps to a real, already-existing
@@ -6200,6 +6597,7 @@
   const settingsModal = document.getElementById('settingsModal');
   function openSettingsModal() {
     settingsModal.classList.add('show');
+    refreshThemeControlsUI();
     const info = document.getElementById('settingsStorageInfo');
     info.textContent = 'Checking…';
     dbGetAllProjects().then(list => {
@@ -6216,6 +6614,63 @@
   document.getElementById('settingsClearAutosaveBtn').onclick = () => {
     try { localStorage.removeItem(AUTOSAVE_KEY); toast('Session recovery data cleared.', 2200); } catch (e) {}
   };
+
+  // ---------- Theme (appearance + accent color) ----------
+  // Same ACCENT_PRESETS as the tiny pre-paint script in <head> (kept in sync manually — that copy
+  // has to run standalone before this script exists). Every button/panel in the app is already
+  // built on the shared --accent*/--bg/--panel*/--ink* CSS tokens (see the PREMIUM PASS comment
+  // near the top of the stylesheet), so switching these variables re-themes the whole app in one
+  // shot — no other file or per-tool code needs to know theming exists.
+  const ACCENT_PRESETS = {
+    orange: { label: 'Orange', a: '#ff8a4c', a2: '#ffc98a', a3: '#e2632a', dim: '#5a3a2b', glow: 'rgba(255,138,76,0.35)', grad: 'linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08))' },
+    blue: { label: 'Blue', a: '#4c9aff', a2: '#8ac2ff', a3: '#2a63e2', dim: '#2b3a5a', glow: 'rgba(76,154,255,0.35)', grad: 'linear-gradient(135deg, #6cb2ff 0%, #3d84ff 55%, #2a63e2 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,166,255,0.16), rgba(42,99,226,0.08))' },
+    green: { label: 'Green', a: '#52d18a', a2: '#96e8bb', a3: '#2a9e5c', dim: '#254a35', glow: 'rgba(82,209,138,0.35)', grad: 'linear-gradient(135deg, #78e0a6 0%, #45c67f 55%, #2a9e5c 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,224,166,0.16), rgba(42,158,92,0.08))' },
+    purple: { label: 'Purple', a: '#b083ff', a2: '#d6bbff', a3: '#7c3fe2', dim: '#3a2b5a', glow: 'rgba(176,131,255,0.35)', grad: 'linear-gradient(135deg, #c8a4ff 0%, #a56aff 55%, #7c3fe2 100%)', gradsoft: 'linear-gradient(135deg, rgba(198,164,255,0.16), rgba(124,63,226,0.08))' },
+    red: { label: 'Red', a: '#ff6363', a2: '#ffa3a3', a3: '#d92c2c', dim: '#5a2b2b', glow: 'rgba(255,99,99,0.35)', grad: 'linear-gradient(135deg, #ff8a8a 0%, #ff5252 55%, #d92c2c 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,138,138,0.16), rgba(217,44,44,0.08))' },
+    teal: { label: 'Teal', a: '#3ed6c4', a2: '#8aeee2', a3: '#1f9e8f', dim: '#254a46', glow: 'rgba(62,214,196,0.35)', grad: 'linear-gradient(135deg, #6ee6d8 0%, #33c4b1 55%, #1f9e8f 100%)', gradsoft: 'linear-gradient(135deg, rgba(110,230,216,0.16), rgba(31,158,143,0.08))' }
+  };
+  function currentThemeMode() { try { return localStorage.getItem('themeMode') || 'dark'; } catch (e) { return 'dark'; } }
+  function currentAccentName() { try { return localStorage.getItem('themeAccent') || 'orange'; } catch (e) { return 'orange'; } }
+  function applyThemeMode(mode) {
+    document.documentElement.setAttribute('data-theme', mode === 'light' ? 'light' : 'dark');
+    try { localStorage.setItem('themeMode', mode); } catch (e) {}
+  }
+  function applyAccent(name) {
+    const p = ACCENT_PRESETS[name] || ACCENT_PRESETS.orange;
+    const root = document.documentElement.style;
+    root.setProperty('--accent', p.a);
+    root.setProperty('--accent-2', p.a2);
+    root.setProperty('--accent-3', p.a3);
+    root.setProperty('--accent-dim', p.dim);
+    root.setProperty('--accent-glow', p.glow);
+    root.setProperty('--accent-grad', p.grad);
+    root.setProperty('--accent-grad-soft', p.gradsoft);
+    try { localStorage.setItem('themeAccent', name); } catch (e) {}
+  }
+  const themeModeSeg = document.getElementById('themeModeSeg');
+  themeModeSeg.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      applyThemeMode(btn.dataset.mode);
+      themeModeSeg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+    };
+  });
+  const accentSwatchesEl = document.getElementById('accentSwatches');
+  Object.keys(ACCENT_PRESETS).forEach(name => {
+    const p = ACCENT_PRESETS[name];
+    const sw = document.createElement('div');
+    sw.className = 'swatch'; sw.title = p.label;
+    sw.style.background = p.grad;
+    sw.onclick = () => {
+      applyAccent(name);
+      accentSwatchesEl.querySelectorAll('.swatch').forEach(s => s.classList.toggle('active', s === sw));
+    };
+    accentSwatchesEl.appendChild(sw);
+  });
+  function refreshThemeControlsUI() {
+    const mode = currentThemeMode(), accentName = currentAccentName();
+    themeModeSeg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    accentSwatchesEl.querySelectorAll('.swatch').forEach((s, i) => s.classList.toggle('active', Object.keys(ACCENT_PRESETS)[i] === accentName));
+  }
 
   // A single reused offscreen renderer for thumbnails, so we never pile up extra WebGL contexts
   // (mobile browsers only allow a handful of live contexts at once).
@@ -8320,7 +8775,7 @@
     const n = makePaintLayer('Layer ' + (target.layers.length + 1), w, h);
     target.layers.push(n);
     target.activeLayerId = n.id;
-    buildTerrainDock();
+    refreshPaintDock();
   }
   function duplicatePaintLayer(target, id) {
     const src = target.layers.find(l => l.id === id); if (!src) return;
@@ -8329,7 +8784,7 @@
     copy.opacity = src.opacity; copy.visible = src.visible;
     target.layers.splice(target.layers.indexOf(src) + 1, 0, copy);
     target.activeLayerId = copy.id;
-    buildTerrainDock();
+    refreshPaintDock();
   }
   function mergeLayerDown(target, id) {
     const idx = target.layers.findIndex(l => l.id === id);
@@ -8344,7 +8799,7 @@
     target.layers.splice(idx, 1);
     target.activeLayerId = below.id;
     compositePaintTarget(target);
-    buildTerrainDock();
+    refreshPaintDock();
   }
   function deletePaintLayer(target, id) {
     if (target.layers.length <= 1) { toast('Can\'t delete the last layer — clear it or paint over it instead.', 2200); return; }
@@ -8353,12 +8808,12 @@
     target.layers.splice(idx, 1);
     if (target.activeLayerId === id) target.activeLayerId = target.layers[Math.max(0, idx - 1)].id;
     compositePaintTarget(target);
-    buildTerrainDock();
+    refreshPaintDock();
   }
   function renamePaintLayer(target, id) {
     const l = target.layers.find(x => x.id === id); if (!l) return;
     const nn = prompt('Layer name', l.name);
-    if (nn && nn.trim()) { l.name = nn.trim().slice(0, 40); buildTerrainDock(); }
+    if (nn && nn.trim()) { l.name = nn.trim().slice(0, 40); refreshPaintDock(); }
   }
   // Accepts one OR MANY texture files for the stamp brush at once — same multi-select +
   // auto-classify-by-filename UX as the Material panel and Character Paint's "Load texture(s)…",
@@ -8406,10 +8861,11 @@
       brushLoadedSlots.clear();
       assignments.forEach(a => brushLoadedSlots.add(a.slot));
       if (materialSlots.length) {
-        // Ground meshes this stamp brush actually paints onto: every custom-terrain paint surface,
-        // or just the single procedural ground plane — same set currentPaintTarget() draws pixels
-        // into, so the PBR maps land on exactly what the brush visually represents.
-        const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+        // Meshes this stamp brush actually paints onto: Character Paint's per-mesh canvases, every
+        // custom-terrain paint surface, or just the single procedural ground plane — same set
+        // currentPaintTarget()/currentCharPaintTarget() draws pixels into, so the PBR maps land on
+        // exactly what the brush visually represents, in either workspace.
+        const groundMeshes = activePaintMeshTargets();
         groundMeshes.forEach(mesh => {
           if (needsStandard) { const prevMat = firstMaterialOf(mesh); const newMat = ensureStandardMaterial(mesh); if (newMat !== prevMat) upgraded++; }
           const mat = firstMaterialOf(mesh);
@@ -8419,7 +8875,7 @@
         });
       }
 
-      buildTerrainDock();
+      refreshPaintDock();
       const summary = assignments.map(a => TEXTURE_SLOT_LABEL[a.slot] + (a.slot === 'map' ? ' (stamp)' : '')).join(', ');
       const upgradeNote = upgraded ? (' (upgraded ground material to support it)') : '';
       toast('Loaded: ' + summary + upgradeNote + (skipped.length ? (' — skipped ' + skipped.length + ' unrecognized file(s)') : ''), 3800);
@@ -8479,7 +8935,7 @@
       const py = Math.max(0, Math.min(target.ctx.canvas.height - 1, Math.round(y)));
       const d = target.ctx.getImageData(px, py, 1, 1).data;
       brushColor = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('');
-      if (isStrokeStart) { toast('Picked color from canvas.', 1200); if (terrainDockTab === 'paint') buildTerrainDock(); }
+      if (isStrokeStart) { toast('Picked color from canvas.', 1200); if ((workspace === 'terrain' && terrainDockTab === 'paint') || (workspace === 'character' && charSubTab === 'paint')) refreshPaintDock(); }
       return;
     }
 
@@ -8579,6 +9035,18 @@
   let activeGroundSlotId = 'grass';
   let groundPaintTextureOn = true; // when off, paint falls back to a flat color (the old behavior)
   function activeGroundSlot() { return groundSlots.find(s => s.id === activeGroundSlotId) || groundSlots[0]; }
+  // Rebuilds whichever dock is currently showing a paint panel (Character Paint or Terrain/Map
+  // Paint) — used by every tool/material/layer control shared between the two, so one dock always
+  // ends up in sync regardless of which workspace the control was tapped from.
+  function refreshPaintDock() { if (workspace === 'character') buildCharacterDock(); else buildTerrainDock(); }
+  // The real THREE meshes the active paint tools (Material swatches, Texture-brush PBR upload)
+  // should shade — Character Paint's per-mesh canvases, or terrain's custom-map meshes / single
+  // ground plane. Keeps the multi-slot Material palette and the Texture brush's PBR maps applying
+  // to whichever surface is actually being painted, in both workspaces alike.
+  function activePaintMeshTargets() {
+    if (workspace === 'character') return paintMeshes.map(p => p.mesh);
+    return terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+  }
   const _slotPatternCache = new Map();
   // Builds (and caches) a small tileable swatch for a slot: either the user's imported photo, or a
   // procedurally speckled tile in the slot's base color so every default material looks distinct
@@ -8627,7 +9095,7 @@
     inp.onchange = (e) => {
       const f = e.target.files[0]; if (!f) return;
       const img = new Image();
-      img.onload = () => { slot.img = img; slot._dirty = true; slot._imgRev = (slot._imgRev || 0) + 1; buildTerrainDock(); toast('Texture set for ' + slot.name + '.', 1600); };
+      img.onload = () => { slot.img = img; slot._dirty = true; slot._imgRev = (slot._imgRev || 0) + 1; refreshPaintDock(); toast('Texture set for ' + slot.name + '.', 1600); };
       img.onerror = () => toast('Could not load that image.', 1800);
       img.src = URL.createObjectURL(f);
     };
@@ -8691,7 +9159,7 @@
         summaryParts.push(slot.name + ' (' + parts.join(', ') + ')');
       });
       if (groundSlots.includes(activeGroundSlot())) syncActiveGroundSlotMaterial();
-      buildTerrainDock();
+      refreshPaintDock();
       toast('Loaded — ' + summaryParts.join('; ') + (unmatched.length ? ('. Skipped ' + unmatched.length + ' unmatched file(s).') : '.'), 4200);
     })();
   }
@@ -8702,7 +9170,7 @@
   function syncActiveGroundSlotMaterial() {
     const slot = activeGroundSlot();
     if (!slot || !slot._pbr || !Object.keys(slot._pbr).length) return;
-    const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
+    const groundMeshes = activePaintMeshTargets();
     const needsStandard = Object.keys(slot._pbr).some(s => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(s));
     groundMeshes.forEach(mesh => {
       if (needsStandard) ensureStandardMaterial(mesh);
@@ -10795,6 +11263,18 @@
     pointer.y = -((cy - rect.top) / rect.height) * 2 + 1;
   }
 
+  // Character body paint now funnels through the SAME central dispatcher (applyPaintTool) as
+  // terrain/map paint — one shared paint system instead of two. This is what gives Character Paint
+  // every tool (Brush/Eraser/Smudge/Fill/Clone/Picker/Material), the same layer stack, and the same
+  // multi-slot Material palette (groundSlots) that terrain painting already had — see
+  // currentCharPaintTarget() and the shared buildBrushToolPanel()/buildPaintLayersPanel() dock UI.
+  let lastPaintedCharEntry = null; // which paintMeshes entry the Layers panel currently shows
+  function currentCharPaintTarget() {
+    if (!paintMeshes.length) return null;
+    const entry = (lastPaintedCharEntry && paintMeshes.includes(lastPaintedCharEntry)) ? lastPaintedCharEntry : paintMeshes[0];
+    ensureLayerStack(entry);
+    return entry;
+  }
   function paintCharacterAtPointer() {
     if (!paintMeshes.length) return;
     raycaster.setFromCamera(pointer, camera);
@@ -10804,19 +11284,14 @@
     if (!hit.uv) return;
     const entry = paintMeshes.find(p => p.mesh === hit.object);
     if (!entry) return;
-    if (!strokeSavedChar[entry.mesh.id]) {
+    const isStrokeStart = !strokeSavedChar[entry.mesh.id];
+    if (isStrokeStart) {
       _paintStrokeBefore.set(entry.mesh.id, { entry, before: entry.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE) });
       strokeSavedChar[entry.mesh.id] = true;
     }
+    if (lastPaintedCharEntry !== entry) { lastPaintedCharEntry = entry; if (workspace === 'character' && charSubTab === 'paint') buildCharacterDock(); }
     const x = hit.uv.x * TEX_SIZE, y = (1 - hit.uv.y) * TEX_SIZE;
-    entry.ctx.globalCompositeOperation = (charMode === 'erase') ? 'destination-out' : 'source-over';
-    entry.ctx.globalAlpha = (charMode === 'erase') ? 1 : brushOpacity;
-    entry.ctx.fillStyle = brushColor;
-    entry.ctx.beginPath();
-    entry.ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-    entry.ctx.fill();
-    entry.ctx.globalAlpha = 1;
-    flagTextureDirty(entry.texture);
+    applyPaintTool(entry, x, y, isStrokeStart);
   }
 
   // ---------- Dense-map painting fallback (vertex colors) ----------
@@ -11734,6 +12209,310 @@
       if (mats.some(m => m && m.map)) found = true;
     });
     return found;
+  }
+
+  // ============================================================
+  // FBX EXPORT (character + animations)
+  // three.js ships an FBX *loader* (that's how characters get imported) but no official FBX
+  // *exporter* at all — GLTFExporter/OBJExporter above are the only exporters the library gives us.
+  // This hand-writes a minimal but real ASCII FBX 7.4 file: mesh geometry, the skeleton (every
+  // bone as a LimbNode), the skin binding (per-vertex bone weights) and every selected animation
+  // clip baked to sampled keyframes on each bone. It's built to match what Blender / Godot / Unity /
+  // Unreal's FBX importers expect for a "character + animation" rig.
+  // Textures do NOT travel with this FBX (same tradeoff this app's existing OBJ export already
+  // makes) — embedding image bytes into ASCII FBX reliably is a much bigger job. Use GLB when you
+  // need the painted texture to come along; use this FBX export for the mesh + rig + animation
+  // themselves, e.g. dropping straight into a Blender/Unity/Unreal FBX-based pipeline.
+  // ============================================================
+  const FBX_TICKS_PER_SECOND = 46186158000; // FBX 7.x internal time unit: exactly one second
+  function fbxTimeFromSeconds(s) { return Math.round(s * FBX_TICKS_PER_SECOND); }
+  let _fbxIdSeed = 1000000;
+  function nextFbxId() { return _fbxIdSeed++; }
+  function fbxNum(n) { if (!isFinite(n)) n = 0; return (Math.round(n * 1e6) / 1e6).toString(); }
+  function fbxSafeName(s) { return String(s || '').replace(/[^a-zA-Z0-9_]+/g, '_') || 'node'; }
+  function fbxMat16(m) { // THREE.Matrix4 -> 16 numbers, FBX wants column-major (three.js .elements already is)
+    return Array.from(m.elements).map(fbxNum).join(',');
+  }
+
+  function buildFbxMeshGeometryAndModel(mesh, idx) {
+    let geo = mesh.geometry;
+    if (geo.index) geo = geo.toNonIndexed();
+    const pos = geo.attributes.position;
+    const norm = geo.attributes.normal;
+    const uv = geo.attributes.uv;
+    const skinIdx = geo.attributes.skinIndex;
+    const skinWt = geo.attributes.skinWeight;
+    const vertCount = pos.count;
+
+    const vertsArr = [];
+    for (let i = 0; i < vertCount; i++) vertsArr.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+    const polyIdx = [];
+    for (let t = 0; t < vertCount / 3; t++) {
+      const a = t * 3, b = t * 3 + 1, c = t * 3 + 2;
+      polyIdx.push(a, b, (-c - 1));
+    }
+    const normArr = [];
+    if (norm) for (let i = 0; i < vertCount; i++) normArr.push(norm.getX(i), norm.getY(i), norm.getZ(i));
+    const uvArr = [];
+    if (uv) for (let i = 0; i < vertCount; i++) uvArr.push(uv.getX(i), uv.getY(i));
+
+    const geoId = nextFbxId();
+    const modelId = nextFbxId();
+    let s = '';
+    s += 'Geometry: ' + geoId + ', "Geometry::mesh' + idx + '", "Mesh" {\n';
+    s += '  Vertices: *' + vertsArr.length + ' {\n    a: ' + vertsArr.map(fbxNum).join(',') + '\n  }\n';
+    s += '  PolygonVertexIndex: *' + polyIdx.length + ' {\n    a: ' + polyIdx.join(',') + '\n  }\n';
+    s += '  GeometryVersion: 124\n';
+    if (normArr.length) {
+      s += '  LayerElementNormal: 0 {\n    Version: 101\n    Name: ""\n    MappingInformationType: "ByPolygonVertex"\n    ReferenceInformationType: "Direct"\n    Normals: *' + normArr.length + ' {\n      a: ' + normArr.map(fbxNum).join(',') + '\n    }\n  }\n';
+    }
+    if (uvArr.length) {
+      s += '  LayerElementUV: 0 {\n    Version: 101\n    Name: "UVMap"\n    MappingInformationType: "ByPolygonVertex"\n    ReferenceInformationType: "Direct"\n    UV: *' + uvArr.length + ' {\n      a: ' + uvArr.map(fbxNum).join(',') + '\n    }\n  }\n';
+    }
+    s += '  LayerElementMaterial: 0 {\n    Version: 101\n    Name: ""\n    MappingInformationType: "AllSame"\n    ReferenceInformationType: "IndexToDirect"\n    Materials: *1 {\n      a: 0\n    }\n  }\n';
+    s += '  Layer: 0 {\n    Version: 100\n';
+    if (normArr.length) s += '    LayerElement: {\n      Type: "LayerElementNormal"\n      TypedIndex: 0\n    }\n';
+    if (uvArr.length) s += '    LayerElement: {\n      Type: "LayerElementUV"\n      TypedIndex: 0\n    }\n';
+    s += '    LayerElement: {\n      Type: "LayerElementMaterial"\n      TypedIndex: 0\n    }\n';
+    s += '  }\n}\n';
+
+    // A SkinnedMesh's own local transform is normally identity (real pose comes from the
+    // skeleton), so only rigid, non-skinned pieces carry their transform onto the Model node.
+    const isSkinned = !!mesh.isSkinnedMesh;
+    const p3 = isSkinned ? [0, 0, 0] : [mesh.position.x, mesh.position.y, mesh.position.z];
+    const rEul = isSkinned ? [0, 0, 0] : (() => { const e = new THREE.Euler().setFromQuaternion(mesh.quaternion, 'XYZ'); return [THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.y), THREE.MathUtils.radToDeg(e.z)]; })();
+    const s3 = isSkinned ? [1, 1, 1] : [mesh.scale.x, mesh.scale.y, mesh.scale.z];
+    s += 'Model: ' + modelId + ', "Model::mesh' + idx + '", "Mesh" {\n';
+    s += '  Version: 232\n';
+    s += '  Properties70: {\n';
+    s += '    P: "Lcl Translation", "Lcl Translation", "", "A", ' + p3.map(fbxNum).join(',') + '\n';
+    s += '    P: "Lcl Rotation", "Lcl Rotation", "", "A", ' + rEul.map(fbxNum).join(',') + '\n';
+    s += '    P: "Lcl Scaling", "Lcl Scaling", "", "A", ' + s3.map(fbxNum).join(',') + '\n';
+    s += '  }\n  Shading: Y\n  Culling: "CullingOff"\n}\n';
+
+    return { text: s, geoId, modelId, vertCount, skinIdx, skinWt, mesh };
+  }
+
+  // Deformer:Skin + one SubDeformer:Cluster per bone that actually influences this mesh — the
+  // per-vertex weight table that makes the mesh follow the skeleton once animated.
+  function buildFbxSkinBlock(meshBlock, boneList, boneModelIds) {
+    if (!meshBlock.mesh.isSkinnedMesh || !meshBlock.skinIdx || !meshBlock.skinWt) return { text: '', skinId: null, connections: [] };
+    const skinId = nextFbxId();
+    let s = 'Deformer: ' + skinId + ', "Deformer::skin", "Skin" {\n  Version: 101\n  Link_DeformAcuracy: 50\n}\n';
+    const connections = [];
+    connections.push({ type: 'OO', a: skinId, b: meshBlock.geoId });
+
+    const bones = meshBlock.mesh.skeleton.bones;
+    const invMats = meshBlock.mesh.skeleton.boneInverses;
+    const meshWorld = meshBlock.mesh.matrixWorld;
+
+    for (let bi = 0; bi < bones.length; bi++) {
+      const boneModelId = boneModelIds.get(bones[bi]);
+      if (boneModelId === undefined) continue; // bone not part of the exported skeleton set (shouldn't happen)
+      const idxs = [];
+      const wts = [];
+      for (let v = 0; v < meshBlock.vertCount; v++) {
+        for (let k = 0; k < 4; k++) {
+          const bIndex = meshBlock.skinIdx.getComponent(v, k);
+          const w = meshBlock.skinWt.getComponent(v, k);
+          if (bIndex === bi && w > 0.0001) { idxs.push(v); wts.push(w); }
+        }
+      }
+      if (!idxs.length) continue;
+      const clusterId = nextFbxId();
+      const boneWorldBind = invMats[bi].clone().invert(); // bone's own world matrix at bind time
+      s += 'Deformer: ' + clusterId + ', "SubDeformer::cluster' + bi + '", "Cluster" {\n';
+      s += '  Version: 100\n';
+      s += '  Indexes: *' + idxs.length + ' {\n    a: ' + idxs.join(',') + '\n  }\n';
+      s += '  Weights: *' + wts.length + ' {\n    a: ' + wts.map(fbxNum).join(',') + '\n  }\n';
+      s += '  Transform: *16 {\n    a: ' + fbxMat16(meshWorld) + '\n  }\n';
+      s += '  TransformLink: *16 {\n    a: ' + fbxMat16(boneWorldBind) + '\n  }\n';
+      s += '}\n';
+      connections.push({ type: 'OO', a: clusterId, b: skinId });
+      connections.push({ type: 'OO', a: boneModelId, b: clusterId });
+    }
+    return { text: s, skinId, connections };
+  }
+
+  function buildFbxBoneModel(bone) {
+    const id = nextFbxId();
+    const p3 = [bone.position.x, bone.position.y, bone.position.z];
+    const e = new THREE.Euler().setFromQuaternion(bone.quaternion, 'XYZ');
+    const r3 = [THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.y), THREE.MathUtils.radToDeg(e.z)];
+    const s3 = [bone.scale.x, bone.scale.y, bone.scale.z];
+    let s = 'Model: ' + id + ', "Model::' + fbxSafeName(bone.name) + '", "LimbNode" {\n';
+    s += '  Version: 232\n  Properties70: {\n';
+    s += '    P: "Lcl Translation", "Lcl Translation", "", "A", ' + p3.map(fbxNum).join(',') + '\n';
+    s += '    P: "Lcl Rotation", "Lcl Rotation", "", "A", ' + r3.map(fbxNum).join(',') + '\n';
+    s += '    P: "Lcl Scaling", "Lcl Scaling", "", "A", ' + s3.map(fbxNum).join(',') + '\n';
+    s += '  }\n}\n';
+    return { text: s, id };
+  }
+
+  // Bakes one clip onto the given (already cloned/offline) bone hierarchy at a fixed sample rate,
+  // returning { boneName: { times:[sec...], pos:[[x,y,z]...], rot:[[deg,deg,deg]...], scl:[[x,y,z]...] } }.
+  function bakeClipToBoneSamples(bones, clip, sampleFps) {
+    const root = new THREE.Group();
+    bones.filter(b => !bones.includes(b.parent)).forEach(b => root.add(b));
+    const mixer = new THREE.AnimationMixer(root);
+    const action = mixer.clipAction(clip);
+    action.play();
+    action.paused = true;
+    const dt = 1 / sampleFps;
+    const steps = Math.max(1, Math.ceil(clip.duration / dt));
+    const out = new Map();
+    bones.forEach(b => out.set(b, { times: [], pos: [], rot: [], scl: [] }));
+    for (let i = 0; i <= steps; i++) {
+      const t = Math.min(i * dt, clip.duration);
+      mixer.setTime(t);
+      bones.forEach(b => {
+        const rec = out.get(b);
+        rec.times.push(t);
+        rec.pos.push([b.position.x, b.position.y, b.position.z]);
+        const e = new THREE.Euler().setFromQuaternion(b.quaternion, 'XYZ');
+        rec.rot.push([THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.y), THREE.MathUtils.radToDeg(e.z)]);
+        rec.scl.push([b.scale.x, b.scale.y, b.scale.z]);
+      });
+    }
+    mixer.stopAllAction();
+    mixer.uncacheAction(clip, root);
+    return out;
+  }
+
+  function buildFbxAnimCurveNode(propLabel, channelKey, samples, channelIndex) {
+    // channelIndex 0/1/2 = x/y/z within each sample tuple ([x,y,z] per frame)
+    const acnId = nextFbxId();
+    let s = 'AnimationCurveNode: ' + acnId + ', "AnimCurveNode::' + propLabel + '", "" {\n';
+    s += '  Properties70: {\n    P: "d|X", "Number", "", "A", 0\n    P: "d|Y", "Number", "", "A", 0\n    P: "d|Z", "Number", "", "A", 0\n  }\n}\n';
+    const curveIds = {};
+    ['X', 'Y', 'Z'].forEach((axis, ai) => {
+      const curveId = nextFbxId();
+      curveIds[axis] = curveId;
+      const times = samples.times.map(fbxTimeFromSeconds);
+      const values = samples[channelKey].map(v => v[ai]);
+      s += 'AnimationCurve: ' + curveId + ', "AnimCurve::", "" {\n';
+      s += '  Default: ' + fbxNum(values[0] || 0) + '\n  KeyVer: 4008\n';
+      s += '  KeyTime: *' + times.length + ' {\n    a: ' + times.join(',') + '\n  }\n';
+      s += '  KeyValueFloat: *' + values.length + ' {\n    a: ' + values.map(fbxNum).join(',') + '\n  }\n';
+      s += '  KeyAttrFlags: *1 {\n    a: 24840\n  }\n';
+      s += '  KeyAttrDataFloat: *4 {\n    a: 0,0,0,0\n  }\n';
+      s += '  KeyAttrRefCount: *1 {\n    a: ' + times.length + '\n  }\n';
+      s += '}\n';
+    });
+    return { text: s, acnId, curveIds };
+  }
+
+  // Assembles the full ASCII FBX 7.4 document for `root` (a character: skinned mesh(es) + skeleton)
+  // plus every clip in `animClips`, and hands the resulting text to the normal save/share flow.
+  function exportFBX(root, filename, animClips) {
+    if (!root) { toast('Nothing to export yet.', 1800); return; }
+    const meshes = [];
+    root.updateMatrixWorld(true);
+    root.traverse(o => { if (o.isMesh && o.visible && o.geometry && o.geometry.attributes.position.count) meshes.push(o); });
+    if (!meshes.length) { toast('Nothing to export yet — no visible geometry loaded.', 2600); return; }
+
+    try {
+      _fbxIdSeed = 1000000;
+      const bones = collectBones(root);
+      const boneModelIds = new Map();
+      let bonesText = '';
+      const boneConnections = [];
+      const boneById = new Map();
+      bones.forEach(b => {
+        const built = buildFbxBoneModel(b);
+        boneModelIds.set(b, built.id);
+        boneById.set(b, built.id);
+        bonesText += built.text;
+      });
+      bones.forEach(b => {
+        const parentId = bones.includes(b.parent) ? boneById.get(b.parent) : 0; // 0 = scene root
+        boneConnections.push({ type: 'OO', a: boneById.get(b), b: parentId });
+      });
+
+      let meshesText = '';
+      let skinsText = '';
+      const meshConnections = [];
+      const meshBlocks = meshes.map((m, i) => buildFbxMeshGeometryAndModel(m, i));
+      meshBlocks.forEach(mb => {
+        meshesText += mb.text;
+        meshConnections.push({ type: 'OO', a: mb.geoId, b: mb.modelId });
+        meshConnections.push({ type: 'OO', a: mb.modelId, b: 0 });
+        const skin = buildFbxSkinBlock(mb, bones, boneModelIds);
+        if (skin.text) { skinsText += skin.text; skin.connections.forEach(c => meshConnections.push(c)); }
+      });
+      // Root bones parent straight onto the scene (id 0) same as mesh Models above.
+      bones.forEach(b => { if (!bones.includes(b.parent)) { /* already 0 via loop above */ } });
+
+      let animText = '';
+      const animConnections = [];
+      const clips = (animClips || []).filter(Boolean);
+      const stackIds = [];
+      clips.forEach((clip, ci) => {
+        const safeName = fbxSafeName(clip.name || ('anim' + ci));
+        const stackId = nextFbxId();
+        const layerId = nextFbxId();
+        const start = 0, stop = fbxTimeFromSeconds(clip.duration);
+        animText += 'AnimationStack: ' + stackId + ', "AnimStack::' + safeName + '", "" {\n';
+        animText += '  Properties70: {\n    P: "LocalStop", "KTime", "Time", "",' + stop + '\n    P: "ReferenceStop", "KTime", "Time", "",' + stop + '\n  }\n}\n';
+        animText += 'AnimationLayer: ' + layerId + ', "AnimLayer::Base", "" {\n}\n';
+        animConnections.push({ type: 'OO', a: layerId, b: stackId });
+        stackIds.push(stackId);
+
+        // Only bones that this clip actually animates get baked — cheaper output, and keeps
+        // untouched bones sitting at their existing bind pose in this clip.
+        const animatedBoneNames = new Set(clip.tracks.map(t => t.name.split('.')[0]));
+        const clipBones = bones.filter(b => animatedBoneNames.has(b.name) || animatedBoneNames.has(b.uuid));
+        if (!clipBones.length) return;
+        const samples = bakeClipToBoneSamples(clipBones, clip, 30);
+        clipBones.forEach(b => {
+          const rec = samples.get(b);
+          if (!rec) return;
+          const boneModelId = boneModelIds.get(b);
+          const t = buildFbxAnimCurveNode('T', 'pos', rec, 0);
+          const r = buildFbxAnimCurveNode('R', 'rot', rec, 0);
+          const sc = buildFbxAnimCurveNode('S', 'scl', rec, 0);
+          animText += t.text + r.text + sc.text;
+          ['X', 'Y', 'Z'].forEach(axis => {
+            animConnections.push({ type: 'OP', a: t.curveIds[axis], b: t.acnId, p: 'd|' + axis });
+            animConnections.push({ type: 'OP', a: r.curveIds[axis], b: r.acnId, p: 'd|' + axis });
+            animConnections.push({ type: 'OP', a: sc.curveIds[axis], b: sc.acnId, p: 'd|' + axis });
+          });
+          animConnections.push({ type: 'OP', a: t.acnId, b: boneModelId, p: 'Lcl Translation' });
+          animConnections.push({ type: 'OP', a: r.acnId, b: boneModelId, p: 'Lcl Rotation' });
+          animConnections.push({ type: 'OP', a: sc.acnId, b: boneModelId, p: 'Lcl Scaling' });
+          animConnections.push({ type: 'OO', a: t.acnId, b: layerId });
+          animConnections.push({ type: 'OO', a: r.acnId, b: layerId });
+          animConnections.push({ type: 'OO', a: sc.acnId, b: layerId });
+        });
+      });
+
+      const allConnections = [...boneConnections, ...meshConnections, ...animConnections];
+      let connText = 'Connections: {\n';
+      allConnections.forEach(c => {
+        if (c.type === 'OP') connText += '  C: "OP",' + c.a + ',' + c.b + ',"' + c.p + '"\n';
+        else connText += '  C: "OO",' + c.a + ',' + c.b + '\n';
+      });
+      connText += '}\n';
+
+      const now = new Date();
+      let doc = '';
+      doc += '; FBX 7.4.0 project file\n; Written by Forge Studio (hand-written ASCII FBX — mesh + skeleton + animation, no textures)\n\n';
+      doc += 'FBXHeaderExtension: {\n  FBXHeaderVersion: 1003\n  FBXVersion: 7400\n  CreationTimeStamp: {\n    Version: 1000\n    Year: ' + now.getFullYear() + '\n    Month: ' + (now.getMonth() + 1) + '\n    Day: ' + now.getDate() + '\n    Hour: ' + now.getHours() + '\n    Minute: ' + now.getMinutes() + '\n    Second: ' + now.getSeconds() + '\n    Millisecond: 0\n  }\n  Creator: "Forge Studio"\n}\n\n';
+      doc += 'GlobalSettings: {\n  Version: 1000\n  Properties70: {\n    P: "UpAxis", "int", "Integer", "",1\n    P: "UpAxisSign", "int", "Integer", "",1\n    P: "FrontAxis", "int", "Integer", "",2\n    P: "FrontAxisSign", "int", "Integer", "",1\n    P: "CoordAxis", "int", "Integer", "",0\n    P: "CoordAxisSign", "int", "Integer", "",1\n    P: "UnitScaleFactor", "double", "Number", "",1\n  }\n}\n\n';
+      doc += 'Objects: {\n' + bonesText + meshesText + skinsText + animText + '}\n\n';
+      doc += connText + '\n';
+      if (stackIds.length) {
+        doc += 'Takes: {\n  Current: "' + (clips[0] ? fbxSafeName(clips[0].name || 'anim0') : '') + '"\n}\n';
+      }
+
+      const blob = new Blob([doc], { type: 'application/octet-stream' });
+      downloadDataUrl(URL.createObjectURL(blob), filename);
+      const animNote = clips.length ? (' with ' + clips.length + ' animation(s) baked in') : '';
+      toast('FBX exported' + animNote + ' (' + meshes.length + ' mesh part(s), ' + bones.length + ' bone(s)). Textures don\'t travel with FBX — use GLB export for the painted texture.', 5600);
+    } catch (err) {
+      console.error(err);
+      toast('FBX export failed: ' + (err && err.message || 'unknown error') + ' — try GLB export instead.', 4200);
+    }
   }
 
   // ============================================================
@@ -12958,46 +13737,29 @@
         bGoAnim.onclick = () => { charDockTab = 'animation'; setCharMode('orbit'); };
         actionsAnim.appendChild(bGoAnim); dock.appendChild(actionsAnim);
       } else if (charSubTab === 'paint') {
+        // Character Paint shares the EXACT same tool system as Terrain/Map Paint (see
+        // buildBrushToolPanel/buildPaintLayersPanel) — Brush/Eraser/Smudge/Fill/Clone/Picker/
+        // Material/Texture, the same multi-slot Material palette (upload a texture into a slot
+        // once, on either workspace, and it stays ready to paint with — no re-uploading), and the
+        // same layer stack. Only the Orbit/Paint switch below and the model/texture actions at the
+        // bottom stay Character-specific.
         const modeRow = document.createElement('div'); modeRow.className = 'row';
-        modeRow.innerHTML = '<div class="label">Mode</div>';
-        const seg = document.createElement('div'); seg.className = 'seg';
-        ['orbit', 'paint', 'erase'].forEach(m => {
-          const b = document.createElement('button');
-          b.textContent = m[0].toUpperCase() + m.slice(1);
+        const modeSeg = document.createElement('div'); modeSeg.className = 'seg';
+        [['orbit', 'Orbit'], ['paint', 'Paint']].forEach(([m, label]) => {
+          const b = document.createElement('button'); b.textContent = label;
           if (m === charMode) b.classList.add('active');
           b.onclick = () => setCharMode(m);
-          seg.appendChild(b);
+          modeSeg.appendChild(b);
         });
-        modeRow.appendChild(seg); dock.appendChild(modeRow);
+        modeRow.appendChild(modeSeg); dock.appendChild(modeRow);
+        dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
 
-        const colorRow = document.createElement('div'); colorRow.className = 'row';
-        colorRow.innerHTML = '<div class="label">Color</div>';
-        const cp = document.createElement('input'); cp.type = 'color'; cp.id = 'colorpicker'; cp.value = brushColor;
-        cp.oninput = () => { brushColor = cp.value; };
-        colorRow.appendChild(cp);
-        const sw = document.createElement('div'); sw.id = 'swatches';
-        ['#ff7a3d', '#e8e6df', '#2b2b2b', '#7a5c3e', '#4a6b52', '#8b3a3a', '#3a5a7a', '#c9a13b'].forEach(c => {
-          const s = document.createElement('div'); s.className = 'swatch'; s.style.background = c;
-          s.onclick = () => { brushColor = c; cp.value = c; };
-          sw.appendChild(s);
-        });
-        colorRow.appendChild(sw); dock.appendChild(colorRow);
+        if (charMode === 'paint') {
+          buildBrushToolPanel(dock);
+          buildPaintLayersPanel(dock, currentCharPaintTarget(), true);
+          dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
+        }
 
-        const sizeRow = document.createElement('div'); sizeRow.className = 'row';
-        sizeRow.innerHTML = '<div class="label">Size</div>';
-        const range = document.createElement('input'); range.type = 'range'; range.min = 2; range.max = 120; range.value = brushSize;
-        const val = document.createElement('span'); val.style.cssText = 'font-size:12px;color:var(--ink-dim);width:30px;text-align:right;'; val.textContent = brushSize;
-        range.oninput = () => { brushSize = parseInt(range.value, 10); val.textContent = brushSize; };
-        sizeRow.appendChild(range); sizeRow.appendChild(val); dock.appendChild(sizeRow);
-
-        const opRow = document.createElement('div'); opRow.className = 'row';
-        opRow.innerHTML = '<div class="label">Opacity</div>';
-        const opRange = document.createElement('input'); opRange.type = 'range'; opRange.min = 5; opRange.max = 100; opRange.value = Math.round(brushOpacity * 100);
-        const opVal = document.createElement('span'); opVal.style.cssText = 'font-size:12px;color:var(--ink-dim);width:36px;text-align:right;'; opVal.textContent = Math.round(brushOpacity * 100) + '%';
-        opRange.oninput = () => { brushOpacity = parseInt(opRange.value, 10) / 100; opVal.textContent = opRange.value + '%'; };
-        opRow.appendChild(opRange); opRow.appendChild(opVal); dock.appendChild(opRow);
-
-        const div = document.createElement('div'); div.className = 'divider'; dock.appendChild(div);
         const secLabel = document.createElement('div'); secLabel.className = 'sec-label'; secLabel.textContent = 'Model & texture';
         dock.appendChild(secLabel);
 
@@ -13015,6 +13777,7 @@
             entry.ctx.fillStyle = '#cfcfd2';
             entry.ctx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
             entry.texture.needsUpdate = true;
+            entry.layers = []; entry.activeLayerId = null; // drop stale layers so they don't repaint over this clear
           });
           pushCanvasHistory('clear paint', captured);
           toast('Cleared.', 1200);
@@ -13615,6 +14378,21 @@
         actionsC.appendChild(bGlbAll); actionsC.appendChild(bAnimsOnly);
         dock.appendChild(actionsC);
 
+        const actionsF = document.createElement('div'); actionsF.className = 'row actions';
+        const bFbxAll = document.createElement('button'); bFbxAll.className = 'btn green';
+        bFbxAll.textContent = selectedCount > 0 && selectedCount < characterAnimations.length
+          ? 'Export character + ' + selectedCount + ' selected animation' + (selectedCount === 1 ? '' : 's') + ' (FBX)'
+          : 'Export character + all animations (FBX)';
+        bFbxAll.title = 'Mesh + skeleton + every checked animation baked into one .fbx. No painted texture (use GLB for that).';
+        if (characterAnimations.length && selectedCount === 0) bFbxAll.disabled = true;
+        bFbxAll.onclick = () => {
+          const chosen = characterAnimations.filter(a => a.selected !== false);
+          if (characterAnimations.length && !chosen.length) { toast('No animations selected — check at least one on the Animation tab, or use Select all.', 2800); return; }
+          exportFBX(charRoot, 'character_combined.fbx', chosen.map(a => a.clip));
+        };
+        actionsF.appendChild(bFbxAll);
+        dock.appendChild(actionsF);
+
         const actionsD = document.createElement('div'); actionsD.className = 'row actions';
         const bGlbTexOnly = document.createElement('button'); bGlbTexOnly.className = 'btn'; bGlbTexOnly.textContent = 'Export texture only (GLB)';
         bGlbTexOnly.title = 'Mesh + painted texture, no animations.';
@@ -13633,7 +14411,7 @@
 
         const note3 = document.createElement('p');
         note3.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:8px 2px 0;line-height:1.5;';
-        note3.textContent = 'GLB carries mesh, painted texture and every checked animation from the Animation tab, ready to drop into your Godot project — each animation becomes its own clip on the AnimationPlayer. "Animations only" skips the mesh/texture entirely and bundles just the checked animations, skeleton-only. "Skeleton only" is bones-only too, but with no animation at all — just the current bind pose, for handing off the rig shape itself. OBJ is geometry-only — no texture or animations travel with it, so use it only for engines that can\'t read glTF.';
+        note3.textContent = 'GLB carries mesh, painted texture and every checked animation from the Animation tab, ready to drop into your Godot project — each animation becomes its own clip on the AnimationPlayer. FBX carries mesh + skeleton + every checked animation too (Blender/Unity/Unreal-friendly), but no painted texture — use GLB when you need the texture to travel with the file. "Animations only" skips the mesh/texture entirely and bundles just the checked animations, skeleton-only. "Skeleton only" is bones-only too, but with no animation at all — just the current bind pose, for handing off the rig shape itself. OBJ is geometry-only — no texture or animations travel with it, so use it only for engines that can\'t read glTF.';
         dock.appendChild(note3);
       }
 
@@ -13759,28 +14537,68 @@
   // such reason to be limited — commitFn() is called with the raw typed number, uncapped, so e.g.
   // a brush-radius slider maxing visually at 3.00 can still be set to 12 by typing it; the slider
   // thumb just pins at its end while the real value underneath keeps working normally.
+  // Small in-app numeric keypad — used instead of a real <input type=number>, so tapping a
+  // slider's value never focuses an actual text field and never triggers the phone's own
+  // keyboard. Typed value is passed through uncapped (no min/max clamp), so e.g. 0.001 or a
+  // very large number both work even outside the slider's own drag range.
+  function openNumpad(initialValue, onConfirm) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'numpad-backdrop';
+    const pad = document.createElement('div');
+    pad.className = 'numpad';
+    const display = document.createElement('div');
+    display.className = 'numpad-display';
+    let str = (initialValue === undefined || initialValue === null || isNaN(initialValue)) ? '0' : String(initialValue);
+    const render = () => { display.textContent = str; };
+    render();
+    pad.appendChild(display);
+
+    const grid = document.createElement('div');
+    grid.className = 'numpad-grid';
+    const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '±', '0', '.', '⌫', 'Cancel', 'Done'];
+    keys.forEach((k) => {
+      const btn = document.createElement('div');
+      btn.className = 'numpad-key' + (k === 'Cancel' || k === '⌫' ? ' fn' : '') + (k === 'Done' ? ' confirm' : '');
+      btn.textContent = k;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (k === 'Cancel') { close(false); return; }
+        if (k === 'Done') { close(true); return; }
+        if (k === '⌫') { str = str.length > 1 ? str.slice(0, -1) : '0'; render(); return; }
+        if (k === '±') { str = str.startsWith('-') ? str.slice(1) : '-' + str; render(); return; }
+        if (k === '.') { if (!str.includes('.')) { str += '.'; render(); } return; }
+        // digit
+        str = (str === '0') ? k : str + k;
+        render();
+      };
+      grid.appendChild(btn);
+    });
+    pad.appendChild(grid);
+
+    const hint = document.createElement('div');
+    hint.className = 'numpad-hint';
+    hint.textContent = 'No limit — type any value, e.g. 0.001';
+    pad.appendChild(hint);
+
+    backdrop.appendChild(pad);
+    pad.onclick = (e) => e.stopPropagation();
+    backdrop.onclick = () => close(false);
+    document.body.appendChild(backdrop);
+
+    function close(apply) {
+      if (apply) {
+        const typed = parseFloat(str);
+        if (!isNaN(typed)) onConfirm(typed);
+      }
+      backdrop.remove();
+    }
+  }
   function attachEditableValue(displayEl, range, step, commitFn) {
     displayEl.style.cursor = 'text';
     displayEl.title = 'Tap to type an exact value — no limit';
     displayEl.onclick = (e) => {
       e.stopPropagation();
-      const input = document.createElement('input');
-      input.type = 'number'; input.step = step || 'any';
-      input.value = parseFloat(range.value);
-      input.className = 'val-edit-input';
-      displayEl.replaceWith(input);
-      input.focus(); input.select();
-      let done = false;
-      const finish = (apply) => {
-        if (done) return; done = true;
-        if (apply) {
-          const typed = parseFloat(input.value);
-          if (!isNaN(typed)) commitFn(typed);
-        }
-        input.replaceWith(displayEl);
-      };
-      input.onblur = () => finish(true);
-      input.onkeydown = (ev) => { if (ev.key === 'Enter') finish(true); else if (ev.key === 'Escape') finish(false); };
+      openNumpad(parseFloat(range.value), (typed) => commitFn(typed));
     };
   }
   function mkSlider(min, max, step, value, onInput, fmt) {
@@ -14164,6 +14982,222 @@
     dock.appendChild(note);
   }
 
+  // ---------- Shared paint controls: Tool row (Brush/Eraser/Smudge/Fill/Clone/Picker/Material/
+  // Texture) + brush settings. Used by BOTH terrain/map Paint and Character Paint, so the two are
+  // genuinely one paint system instead of two separate ones — including the same multi-slot
+  // Material palette (groundSlots), so a texture uploaded once into a slot is reusable by tapping
+  // its swatch, in either workspace, instead of re-uploading it every time. ----------
+  function buildBrushToolPanel(dock) {
+    const toolRow = mkRow('Tool');
+    const toolWrap = document.createElement('div'); toolWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;flex:1;';
+    const TOOLS = [
+      ['brush', '🖌', 'Brush'], ['eraser', '🧹', 'Eraser'], ['smudge', '👆', 'Smudge'], ['fill', '🪣', 'Fill'],
+      ['clone', '📋', 'Clone'], ['picker', '💧', 'Picker'], ['material', '🎛', 'Material'], ['texture', '🖼', 'Texture'],
+    ];
+    TOOLS.forEach(([id, icon, label]) => {
+      const b = document.createElement('button'); b.className = 'iconbtn'; b.style.cssText = 'width:auto;height:34px;padding:0 10px;gap:5px;font-size:12px;';
+      b.innerHTML = '<span style="font-size:14px;">' + icon + '</span><span>' + label + '</span>';
+      if (paintTool === id) { b.style.background = 'var(--accent)'; b.style.borderColor = 'var(--accent)'; b.style.color = '#1a1005'; }
+      b.onclick = () => { paintTool = id; cloneArmed = false; _lastStampPt = null; refreshPaintDock(); };
+      toolWrap.appendChild(b);
+    });
+    toolRow.appendChild(toolWrap); dock.appendChild(toolRow);
+
+    // Per-tool color/material/texture source
+    if (paintTool === 'material') {
+      const matRow = mkRow('Material');
+      const presetWrap = document.createElement('div'); presetWrap.id = 'swatches';
+      groundSlots.forEach(slot => {
+        const sw = document.createElement('div'); sw.className = 'swatch' + (slot.id === activeGroundSlotId ? ' active' : ''); sw.title = slot.name;
+        const patCanvas = buildSlotPatternCanvas(slot);
+        sw.style.backgroundImage = 'url(' + patCanvas.toDataURL() + ')';
+        sw.style.backgroundSize = 'cover';
+        sw.onclick = () => { activeGroundSlotId = slot.id; syncActiveGroundSlotMaterial(); refreshPaintDock(); };
+        presetWrap.appendChild(sw);
+      });
+      matRow.appendChild(presetWrap); dock.appendChild(matRow);
+
+      const bulkRow = document.createElement('div'); bulkRow.className = 'row actions';
+      const bBulk = document.createElement('button'); bBulk.className = 'btn primary'; bBulk.style.flex = '1'; bBulk.textContent = 'Upload texture set(s)…';
+      bBulk.title = 'Pick photos for several materials at once — Rock, Grass, Dirt... — each one is matched to the right swatch by its filename. Upload once here and the same slots paint on both Terrain and Character.';
+      bBulk.onclick = () => openFilePicker(fileInputGroundSlotBulk);
+      bulkRow.appendChild(bBulk); dock.appendChild(bulkRow);
+      const bulkNote = document.createElement('p');
+      bulkNote.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:2px 2px 8px;line-height:1.5;';
+      bulkNote.textContent = 'Select as many files as you like in one go — name them with the material, e.g. "Rock.jpg", "Grass_basecolor.jpg", "Dirt_normal.jpg" — each lands on the matching swatch automatically. These slots are shared: load a texture into one here and it stays ready to paint with — no re-uploading.';
+      dock.appendChild(bulkNote);
+
+      const slot = activeGroundSlot();
+      const scaleS = mkSlider(2, 16, 1, slot.scale, v => { slot.scale = v; slot._dirty = true; });
+      dock.appendChild(mkFieldGrid([mkField('🔲', 'Tile', scaleS)], 1));
+      const impRow = document.createElement('div'); impRow.className = 'row actions';
+      const bImp = document.createElement('button'); bImp.className = 'btn'; bImp.textContent = 'Import photo for "' + slot.name + '"';
+      bImp.onclick = () => importGroundSlotTexture(slot);
+      impRow.appendChild(bImp); dock.appendChild(impRow);
+    } else if (paintTool === 'texture') {
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:11.5px;color:var(--ink-dim);margin:0 2px 8px;line-height:1.5;';
+      note.textContent = 'Select every texture file for this brush in one go (e.g. a rock or brick set\u2019s Base Color, Normal, Roughness, AO) — each one is auto-detected by its filename. Base Color becomes the repeating stamp; the rest shade the surface itself.';
+      dock.appendChild(note);
+
+      if (brushTextureImg) {
+        const texRow = document.createElement('div'); texRow.className = 'row';
+        const thumb = document.createElement('img'); thumb.src = brushTextureImg.src; thumb.style.cssText = 'width:36px;height:36px;border-radius:8px;object-fit:cover;border:1px solid var(--line);';
+        const lbl = document.createElement('div'); lbl.style.cssText = 'font-size:11.5px;color:var(--ink-dim);flex:1;'; lbl.textContent = 'Painting with this image as a repeating stamp.';
+        texRow.appendChild(thumb); texRow.appendChild(lbl); dock.appendChild(texRow);
+      }
+
+      // Status pills — same pattern as the Material panel's slot list, so it's immediately clear
+      // which of this brush's textures were recognized and which weren't.
+      const pillWrap = document.createElement('div'); pillWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;';
+      Object.keys(TEXTURE_SLOT_LABEL).forEach(slot => {
+        const has = brushLoadedSlots.has(slot);
+        const p = document.createElement('div');
+        p.style.cssText = 'font-size:11.5px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);' +
+          (has ? 'background:var(--accent);color:#1a1005;border-color:var(--accent);' : 'color:var(--ink-dim);');
+        p.textContent = (has ? '✓ ' : '— ') + TEXTURE_SLOT_LABEL[slot];
+        pillWrap.appendChild(p);
+      });
+      dock.appendChild(pillWrap);
+
+      const actionsU = document.createElement('div'); actionsU.className = 'row actions';
+      const bTex = document.createElement('button'); bTex.className = 'btn primary'; bTex.style.flex = '1'; bTex.textContent = 'Upload texture file(s)…';
+      bTex.onclick = () => openFilePicker(fileInputBrushtex);
+      actionsU.appendChild(bTex);
+      if (brushLoadedSlots.size) {
+        const bClearTex = document.createElement('button'); bClearTex.className = 'btn'; bClearTex.textContent = 'Remove all textures';
+        bClearTex.onclick = () => {
+          brushTextureImg = null; _brushTexturePattern = null; brushLoadedSlots.clear();
+          const groundMeshes = activePaintMeshTargets();
+          groundMeshes.forEach(mesh => {
+            const mat = firstMaterialOf(mesh); if (!mat) return;
+            Object.keys(TEXTURE_SLOT_LABEL).forEach(s => { if (s !== 'map') mat[s] = null; });
+            mat.needsUpdate = true;
+          });
+          refreshPaintDock();
+          toast('Brush textures removed.', 1800);
+        };
+        actionsU.appendChild(bClearTex);
+      }
+      dock.appendChild(actionsU);
+    } else if (paintTool === 'clone') {
+      const cloneRow = document.createElement('div'); cloneRow.className = 'row actions';
+      const bSrc = document.createElement('button'); bSrc.className = 'btn' + (cloneArmed ? ' primary' : ''); bSrc.textContent = cloneArmed ? 'Tap the surface to set source…' : (cloneSourcePt ? 'Re-set clone source' : 'Set clone source');
+      bSrc.onclick = () => { cloneArmed = true; refreshPaintDock(); };
+      cloneRow.appendChild(bSrc); dock.appendChild(cloneRow);
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 6px;line-height:1.5;';
+      note.textContent = 'Tap "Set clone source" then tap a spot on the surface — every stroke after that copies pixels from there, offset to follow your brush.';
+      dock.appendChild(note);
+    } else if (paintTool === 'brush' || paintTool === 'eraser' || paintTool === 'smudge' || paintTool === 'fill') {
+      if (paintTool !== 'eraser' && paintTool !== 'smudge') {
+        const cp = document.createElement('input'); cp.type = 'color'; cp.value = brushColor;
+        cp.oninput = () => { brushColor = cp.value; };
+        const flatRow = mkRow('Color');
+        flatRow.appendChild(cp); dock.appendChild(flatRow);
+      }
+    }
+    if (paintTool === 'picker') {
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 6px;line-height:1.5;';
+      note.textContent = 'Tap anywhere on the surface to pick up its color into Brush color.';
+      dock.appendChild(note);
+    }
+
+    // ---------- Brush controls ----------
+    const secLabelBrush = document.createElement('div'); secLabelBrush.className = 'sec-label'; secLabelBrush.textContent = 'Brush controls';
+    dock.appendChild(secLabelBrush);
+
+    const sz = mkSlider(2, 120, 1, brushSize, v => brushSize = v);
+    const str = mkSlider(5, 100, 1, Math.round(brushStrength * 100), v => brushStrength = v / 100, v => v + '%');
+    const hard = mkSlider(0, 100, 1, Math.round(brushHardness * 100), v => brushHardness = v / 100, v => v + '%');
+    const op = mkSlider(5, 100, 1, Math.round(brushOpacity * 100), v => brushOpacity = v / 100, v => v + '%');
+    const sp = mkSlider(2, 100, 1, Math.round(brushSpacing * 100), v => brushSpacing = v / 100, v => v + '%');
+    dock.appendChild(mkFieldGrid([
+      mkField('⭕', 'Size', sz),
+      mkField('💪', 'Strength', str),
+      mkField('🔘', 'Hardness', hard),
+      mkField('💧', 'Opacity', op),
+      mkField('↔️', 'Spacing', sp),
+    ]));
+
+    const foRow = mkRow('Falloff');
+    const foSeg = document.createElement('div'); foSeg.className = 'seg';
+    [['smooth', 'Smooth'], ['linear', 'Linear'], ['hard', 'Hard']].forEach(([v, label]) => {
+      const b = document.createElement('button'); b.textContent = label;
+      if (v === brushFalloff) b.classList.add('active');
+      b.onclick = () => { brushFalloff = v; refreshPaintDock(); };
+      foSeg.appendChild(b);
+    });
+    foRow.appendChild(foSeg); dock.appendChild(foRow);
+
+    dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
+  }
+
+  // ---------- Shared Texture Layers panel — same layer-stack UI for whichever mesh-based paint
+  // target is currently active (a Character Paint mesh, a custom-terrain mesh, or the procedural
+  // ground plane). isMeshBased is true whenever the target is a real imported mesh (Character
+  // Paint always; terrain only when a custom map is imported) rather than the primitive ground
+  // plane, and just controls a couple of wording differences below. ----------
+  function buildPaintLayersPanel(dock, paintTarget, isMeshBased) {
+    if (!paintTarget) return;
+    const secLabelLayers = document.createElement('div'); secLabelLayers.className = 'sec-label'; secLabelLayers.textContent = 'Texture Layers' + (isMeshBased ? ' — ' + (paintTarget.mesh ? paintTarget.mesh.name || 'surface' : 'surface') : '');
+    dock.appendChild(secLabelLayers);
+
+    // Newest layer first, so "top of the stack" (what paints over everything) is also top of the list.
+    const layerList = paintTarget.layers.slice().reverse();
+    layerList.forEach(l => {
+      const isActive = l.id === paintTarget.activeLayerId;
+      const row = document.createElement('div'); row.className = 'row';
+      row.style.cssText = 'flex-wrap:wrap;padding:6px 2px;' + (isActive ? 'background:var(--panel-2);border-radius:8px;' : '');
+
+      const eyeBtn = document.createElement('button'); eyeBtn.className = 'iconbtn'; eyeBtn.style.cssText = 'width:32px;height:32px;'; eyeBtn.textContent = l.visible ? '👁' : '🚫';
+      eyeBtn.onclick = () => { l.visible = !l.visible; compositePaintTarget(paintTarget); refreshPaintDock(); };
+
+      const lockBtn = document.createElement('button'); lockBtn.className = 'iconbtn'; lockBtn.style.cssText = 'width:32px;height:32px;'; lockBtn.textContent = l.locked ? '🔒' : '🔓';
+      lockBtn.onclick = () => { l.locked = !l.locked; refreshPaintDock(); };
+
+      const nameBtn = document.createElement('div'); nameBtn.style.cssText = 'flex:1;font-size:12.5px;padding:0 4px;cursor:pointer;' + (isActive ? 'font-weight:600;' : 'color:var(--ink-dim);');
+      nameBtn.textContent = l.name;
+      nameBtn.onclick = () => { paintTarget.activeLayerId = l.id; refreshPaintDock(); };
+
+      const renameBtn = document.createElement('button'); renameBtn.className = 'iconbtn'; renameBtn.style.cssText = 'width:32px;height:32px;font-size:12px;'; renameBtn.textContent = '✎';
+      renameBtn.onclick = () => renamePaintLayer(paintTarget, l.id);
+
+      const delBtn = document.createElement('button'); delBtn.className = 'iconbtn'; delBtn.style.cssText = 'width:32px;height:32px;'; delBtn.textContent = '🗑';
+      delBtn.onclick = () => deletePaintLayer(paintTarget, l.id);
+
+      row.appendChild(eyeBtn); row.appendChild(lockBtn); row.appendChild(nameBtn); row.appendChild(renameBtn); row.appendChild(delBtn);
+
+      if (isActive) {
+        const opWrap = document.createElement('div'); opWrap.style.cssText = 'width:100%;display:flex;align-items:center;gap:8px;padding:4px 4px 2px;';
+        const opLbl = document.createElement('span'); opLbl.style.cssText = 'font-size:11px;color:var(--ink-dim);width:44px;'; opLbl.textContent = 'Opacity';
+        const opS = mkSlider(0, 100, 1, Math.round(l.opacity * 100), v => { l.opacity = v / 100; compositePaintTarget(paintTarget); }, v => v + '%');
+        opWrap.appendChild(opLbl); opWrap.appendChild(opS.wrap); row.appendChild(opWrap);
+
+        const actWrap = document.createElement('div'); actWrap.style.cssText = 'width:100%;display:flex;gap:6px;padding:2px 4px 2px;';
+        const bDup = document.createElement('button'); bDup.className = 'btn'; bDup.style.cssText = 'flex:1;padding:7px 6px;font-size:11.5px;'; bDup.textContent = '⧉ Duplicate';
+        bDup.onclick = () => duplicatePaintLayer(paintTarget, l.id);
+        const bMerge = document.createElement('button'); bMerge.className = 'btn'; bMerge.style.cssText = 'flex:1;padding:7px 6px;font-size:11.5px;'; bMerge.textContent = '⬇ Merge down';
+        bMerge.onclick = () => mergeLayerDown(paintTarget, l.id);
+        actWrap.appendChild(bDup); actWrap.appendChild(bMerge); row.appendChild(actWrap);
+      }
+      dock.appendChild(row);
+    });
+
+    const layerActions = document.createElement('div'); layerActions.className = 'row actions';
+    const bAdd = document.createElement('button'); bAdd.className = 'btn primary'; bAdd.style.flex = '1'; bAdd.textContent = '+ New layer';
+    bAdd.onclick = () => addPaintLayer(paintTarget);
+    const bReset = document.createElement('button'); bReset.className = 'btn danger'; bReset.textContent = 'Clear all layers';
+    bReset.onclick = () => { if (confirm('Clear every paint layer on this surface? This cannot be undone.')) clearAllPaintLayers(paintTarget, isMeshBased ? '#cfcfd2' : '#5c7a52'); refreshPaintDock(); };
+    layerActions.appendChild(bAdd); layerActions.appendChild(bReset); dock.appendChild(layerActions);
+
+    const noteLayers = document.createElement('p');
+    noteLayers.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:8px 2px 0;line-height:1.5;';
+    noteLayers.textContent = 'Painting always applies to the highlighted (active) layer. 👁 hides a layer, 🔒 protects it from paint, ⬇ merges it into the layer below.' + (isMeshBased ? ' This panel follows whichever surface you last painted.' : '');
+    dock.appendChild(noteLayers);
+  }
+
   function buildPaintTab() {
     if (terrainTooDense) {
       const note = document.createElement('p');
@@ -14236,211 +15270,10 @@
     }
     setModeBar([['orbit', 'Orbit'], ['paint', 'Paint']]);
 
-    // ---------- Tool row: Brush / Eraser / Smudge / Fill / Clone / Color Picker / Material / Texture ----------
-    const toolRow = mkRow('Tool');
-    const toolWrap = document.createElement('div'); toolWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;flex:1;';
-    const TOOLS = [
-      ['brush', '🖌', 'Brush'], ['eraser', '🧹', 'Eraser'], ['smudge', '👆', 'Smudge'], ['fill', '🪣', 'Fill'],
-      ['clone', '📋', 'Clone'], ['picker', '💧', 'Picker'], ['material', '🎛', 'Material'], ['texture', '🖼', 'Texture'],
-    ];
-    TOOLS.forEach(([id, icon, label]) => {
-      const b = document.createElement('button'); b.className = 'iconbtn'; b.style.cssText = 'width:auto;height:34px;padding:0 10px;gap:5px;font-size:12px;';
-      b.innerHTML = '<span style="font-size:14px;">' + icon + '</span><span>' + label + '</span>';
-      if (paintTool === id) { b.style.background = 'var(--accent)'; b.style.borderColor = 'var(--accent)'; b.style.color = '#1a1005'; }
-      b.onclick = () => { paintTool = id; cloneArmed = false; _lastStampPt = null; buildTerrainDock(); };
-      toolWrap.appendChild(b);
-    });
-    toolRow.appendChild(toolWrap); dock.appendChild(toolRow);
-
-    // Per-tool color/material/texture source
-    if (paintTool === 'material') {
-      const matRow = mkRow('Material');
-      const presetWrap = document.createElement('div'); presetWrap.id = 'swatches';
-      groundSlots.forEach(slot => {
-        const sw = document.createElement('div'); sw.className = 'swatch' + (slot.id === activeGroundSlotId ? ' active' : ''); sw.title = slot.name;
-        const patCanvas = buildSlotPatternCanvas(slot);
-        sw.style.backgroundImage = 'url(' + patCanvas.toDataURL() + ')';
-        sw.style.backgroundSize = 'cover';
-        sw.onclick = () => { activeGroundSlotId = slot.id; syncActiveGroundSlotMaterial(); buildTerrainDock(); };
-        presetWrap.appendChild(sw);
-      });
-      matRow.appendChild(presetWrap); dock.appendChild(matRow);
-
-      const bulkRow = document.createElement('div'); bulkRow.className = 'row actions';
-      const bBulk = document.createElement('button'); bBulk.className = 'btn primary'; bBulk.style.flex = '1'; bBulk.textContent = 'Upload texture set(s)…';
-      bBulk.title = 'Pick photos for several materials at once — Rock, Grass, Dirt... — each one is matched to the right swatch by its filename.';
-      bBulk.onclick = () => openFilePicker(fileInputGroundSlotBulk);
-      bulkRow.appendChild(bBulk); dock.appendChild(bulkRow);
-      const bulkNote = document.createElement('p');
-      bulkNote.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:2px 2px 8px;line-height:1.5;';
-      bulkNote.textContent = 'Select as many files as you like in one go — name them with the material, e.g. "Rock.jpg", "Grass_basecolor.jpg", "Dirt_normal.jpg" — each lands on the matching swatch automatically.';
-      dock.appendChild(bulkNote);
-
-      const slot = activeGroundSlot();
-      const scaleS = mkSlider(2, 16, 1, slot.scale, v => { slot.scale = v; slot._dirty = true; });
-      dock.appendChild(mkFieldGrid([mkField('🔲', 'Tile', scaleS)], 1));
-      const impRow = document.createElement('div'); impRow.className = 'row actions';
-      const bImp = document.createElement('button'); bImp.className = 'btn'; bImp.textContent = 'Import photo for "' + slot.name + '"';
-      bImp.onclick = () => importGroundSlotTexture(slot);
-      impRow.appendChild(bImp); dock.appendChild(impRow);
-    } else if (paintTool === 'texture') {
-      const note = document.createElement('p');
-      note.style.cssText = 'font-size:11.5px;color:var(--ink-dim);margin:0 2px 8px;line-height:1.5;';
-      note.textContent = 'Select every texture file for this brush in one go (e.g. a rock or brick set\u2019s Base Color, Normal, Roughness, AO) — each one is auto-detected by its filename. Base Color becomes the repeating stamp; the rest shade the ground itself.';
-      dock.appendChild(note);
-
-      if (brushTextureImg) {
-        const texRow = document.createElement('div'); texRow.className = 'row';
-        const thumb = document.createElement('img'); thumb.src = brushTextureImg.src; thumb.style.cssText = 'width:36px;height:36px;border-radius:8px;object-fit:cover;border:1px solid var(--line);';
-        const lbl = document.createElement('div'); lbl.style.cssText = 'font-size:11.5px;color:var(--ink-dim);flex:1;'; lbl.textContent = 'Painting with this image as a repeating stamp.';
-        texRow.appendChild(thumb); texRow.appendChild(lbl); dock.appendChild(texRow);
-      }
-
-      // Status pills — same pattern as the Material panel's slot list, so it's immediately clear
-      // which of this brush's textures were recognized and which weren't.
-      const pillWrap = document.createElement('div'); pillWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;';
-      Object.keys(TEXTURE_SLOT_LABEL).forEach(slot => {
-        const has = brushLoadedSlots.has(slot);
-        const p = document.createElement('div');
-        p.style.cssText = 'font-size:11.5px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);' +
-          (has ? 'background:var(--accent);color:#1a1005;border-color:var(--accent);' : 'color:var(--ink-dim);');
-        p.textContent = (has ? '✓ ' : '— ') + TEXTURE_SLOT_LABEL[slot];
-        pillWrap.appendChild(p);
-      });
-      dock.appendChild(pillWrap);
-
-      const actionsU = document.createElement('div'); actionsU.className = 'row actions';
-      const bTex = document.createElement('button'); bTex.className = 'btn primary'; bTex.style.flex = '1'; bTex.textContent = 'Upload texture file(s)…';
-      bTex.onclick = () => openFilePicker(fileInputBrushtex);
-      actionsU.appendChild(bTex);
-      if (brushLoadedSlots.size) {
-        const bClearTex = document.createElement('button'); bClearTex.className = 'btn'; bClearTex.textContent = 'Remove all textures';
-        bClearTex.onclick = () => {
-          brushTextureImg = null; _brushTexturePattern = null; brushLoadedSlots.clear();
-          const groundMeshes = terrainIsCustom ? terrainPaintMeshes.map(p => p.mesh) : (terrainMesh ? [terrainMesh] : []);
-          groundMeshes.forEach(mesh => {
-            const mat = firstMaterialOf(mesh); if (!mat) return;
-            Object.keys(TEXTURE_SLOT_LABEL).forEach(s => { if (s !== 'map') mat[s] = null; });
-            mat.needsUpdate = true;
-          });
-          buildTerrainDock();
-          toast('Brush textures removed.', 1800);
-        };
-        actionsU.appendChild(bClearTex);
-      }
-      dock.appendChild(actionsU);
-    } else if (paintTool === 'clone') {
-      const cloneRow = document.createElement('div'); cloneRow.className = 'row actions';
-      const bSrc = document.createElement('button'); bSrc.className = 'btn' + (cloneArmed ? ' primary' : ''); bSrc.textContent = cloneArmed ? 'Tap the map to set source…' : (cloneSourcePt ? 'Re-set clone source' : 'Set clone source');
-      bSrc.onclick = () => { cloneArmed = true; buildTerrainDock(); };
-      cloneRow.appendChild(bSrc); dock.appendChild(cloneRow);
-      const note = document.createElement('p');
-      note.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 6px;line-height:1.5;';
-      note.textContent = 'Tap "Set clone source" then tap a spot on the ground — every stroke after that copies pixels from there, offset to follow your brush.';
-      dock.appendChild(note);
-    } else if (paintTool === 'brush' || paintTool === 'eraser' || paintTool === 'smudge' || paintTool === 'fill') {
-      if (paintTool !== 'eraser' && paintTool !== 'smudge') {
-        const cp = document.createElement('input'); cp.type = 'color'; cp.value = brushColor;
-        cp.oninput = () => { brushColor = cp.value; };
-        const flatRow = mkRow('Color');
-        flatRow.appendChild(cp); dock.appendChild(flatRow);
-      }
-    }
-    if (paintTool === 'picker') {
-      const note = document.createElement('p');
-      note.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:0 2px 6px;line-height:1.5;';
-      note.textContent = 'Tap anywhere on the ground to pick up its color into Brush color.';
-      dock.appendChild(note);
-    }
-
-    // ---------- Brush controls ----------
-    const secLabelBrush = document.createElement('div'); secLabelBrush.className = 'sec-label'; secLabelBrush.textContent = 'Brush controls';
-    dock.appendChild(secLabelBrush);
-
-    const sz = mkSlider(2, 120, 1, brushSize, v => brushSize = v);
-    const str = mkSlider(5, 100, 1, Math.round(brushStrength * 100), v => brushStrength = v / 100, v => v + '%');
-    const hard = mkSlider(0, 100, 1, Math.round(brushHardness * 100), v => brushHardness = v / 100, v => v + '%');
-    const op = mkSlider(5, 100, 1, Math.round(brushOpacity * 100), v => brushOpacity = v / 100, v => v + '%');
-    const sp = mkSlider(2, 100, 1, Math.round(brushSpacing * 100), v => brushSpacing = v / 100, v => v + '%');
-    dock.appendChild(mkFieldGrid([
-      mkField('⭕', 'Size', sz),
-      mkField('💪', 'Strength', str),
-      mkField('🔘', 'Hardness', hard),
-      mkField('💧', 'Opacity', op),
-      mkField('↔️', 'Spacing', sp),
-    ]));
-
-    const foRow = mkRow('Falloff');
-    const foSeg = document.createElement('div'); foSeg.className = 'seg';
-    [['smooth', 'Smooth'], ['linear', 'Linear'], ['hard', 'Hard']].forEach(([v, label]) => {
-      const b = document.createElement('button'); b.textContent = label;
-      if (v === brushFalloff) b.classList.add('active');
-      b.onclick = () => { brushFalloff = v; buildTerrainDock(); };
-      foSeg.appendChild(b);
-    });
-    foRow.appendChild(foSeg); dock.appendChild(foRow);
-
-    dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
+    buildBrushToolPanel(dock);
 
     // ---------- Texture Layers ----------
-    const paintTarget = currentPaintTarget();
-    if (paintTarget) {
-      const secLabelLayers = document.createElement('div'); secLabelLayers.className = 'sec-label'; secLabelLayers.textContent = 'Texture Layers' + (terrainIsCustom ? ' — ' + (paintTarget.mesh ? paintTarget.mesh.name || 'surface' : 'surface') : '');
-      dock.appendChild(secLabelLayers);
-
-      // Newest layer first, so "top of the stack" (what paints over everything) is also top of the list.
-      const layerList = paintTarget.layers.slice().reverse();
-      layerList.forEach(l => {
-        const isActive = l.id === paintTarget.activeLayerId;
-        const row = document.createElement('div'); row.className = 'row';
-        row.style.cssText = 'flex-wrap:wrap;padding:6px 2px;' + (isActive ? 'background:var(--panel-2);border-radius:8px;' : '');
-
-        const eyeBtn = document.createElement('button'); eyeBtn.className = 'iconbtn'; eyeBtn.style.cssText = 'width:32px;height:32px;'; eyeBtn.textContent = l.visible ? '👁' : '🚫';
-        eyeBtn.onclick = () => { l.visible = !l.visible; compositePaintTarget(paintTarget); buildTerrainDock(); };
-
-        const lockBtn = document.createElement('button'); lockBtn.className = 'iconbtn'; lockBtn.style.cssText = 'width:32px;height:32px;'; lockBtn.textContent = l.locked ? '🔒' : '🔓';
-        lockBtn.onclick = () => { l.locked = !l.locked; buildTerrainDock(); };
-
-        const nameBtn = document.createElement('div'); nameBtn.style.cssText = 'flex:1;font-size:12.5px;padding:0 4px;cursor:pointer;' + (isActive ? 'font-weight:600;' : 'color:var(--ink-dim);');
-        nameBtn.textContent = l.name;
-        nameBtn.onclick = () => { paintTarget.activeLayerId = l.id; buildTerrainDock(); };
-
-        const renameBtn = document.createElement('button'); renameBtn.className = 'iconbtn'; renameBtn.style.cssText = 'width:32px;height:32px;font-size:12px;'; renameBtn.textContent = '✎';
-        renameBtn.onclick = () => renamePaintLayer(paintTarget, l.id);
-
-        const delBtn = document.createElement('button'); delBtn.className = 'iconbtn'; delBtn.style.cssText = 'width:32px;height:32px;'; delBtn.textContent = '🗑';
-        delBtn.onclick = () => deletePaintLayer(paintTarget, l.id);
-
-        row.appendChild(eyeBtn); row.appendChild(lockBtn); row.appendChild(nameBtn); row.appendChild(renameBtn); row.appendChild(delBtn);
-
-        if (isActive) {
-          const opWrap = document.createElement('div'); opWrap.style.cssText = 'width:100%;display:flex;align-items:center;gap:8px;padding:4px 4px 2px;';
-          const opLbl = document.createElement('span'); opLbl.style.cssText = 'font-size:11px;color:var(--ink-dim);width:44px;'; opLbl.textContent = 'Opacity';
-          const opS = mkSlider(0, 100, 1, Math.round(l.opacity * 100), v => { l.opacity = v / 100; compositePaintTarget(paintTarget); }, v => v + '%');
-          opWrap.appendChild(opLbl); opWrap.appendChild(opS.wrap); row.appendChild(opWrap);
-
-          const actWrap = document.createElement('div'); actWrap.style.cssText = 'width:100%;display:flex;gap:6px;padding:2px 4px 2px;';
-          const bDup = document.createElement('button'); bDup.className = 'btn'; bDup.style.cssText = 'flex:1;padding:7px 6px;font-size:11.5px;'; bDup.textContent = '⧉ Duplicate';
-          bDup.onclick = () => duplicatePaintLayer(paintTarget, l.id);
-          const bMerge = document.createElement('button'); bMerge.className = 'btn'; bMerge.style.cssText = 'flex:1;padding:7px 6px;font-size:11.5px;'; bMerge.textContent = '⬇ Merge down';
-          bMerge.onclick = () => mergeLayerDown(paintTarget, l.id);
-          actWrap.appendChild(bDup); actWrap.appendChild(bMerge); row.appendChild(actWrap);
-        }
-        dock.appendChild(row);
-      });
-
-      const layerActions = document.createElement('div'); layerActions.className = 'row actions';
-      const bAdd = document.createElement('button'); bAdd.className = 'btn primary'; bAdd.style.flex = '1'; bAdd.textContent = '+ New layer';
-      bAdd.onclick = () => addPaintLayer(paintTarget);
-      const bReset = document.createElement('button'); bReset.className = 'btn danger'; bReset.textContent = 'Clear all layers';
-      bReset.onclick = () => { if (confirm('Clear every paint layer on this surface? This cannot be undone.')) clearAllPaintLayers(paintTarget, terrainIsCustom ? '#cfcfd2' : '#5c7a52'); buildTerrainDock(); };
-      layerActions.appendChild(bAdd); layerActions.appendChild(bReset); dock.appendChild(layerActions);
-
-      const noteLayers = document.createElement('p');
-      noteLayers.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:8px 2px 0;line-height:1.5;';
-      noteLayers.textContent = 'Painting always applies to the highlighted (active) layer. 👁 hides a layer, 🔒 protects it from paint, ⬇ merges it into the layer below.' + (terrainIsCustom ? ' On an imported map, this panel follows whichever surface you last painted.' : '');
-      dock.appendChild(noteLayers);
-    }
+    buildPaintLayersPanel(dock, currentPaintTarget(), terrainIsCustom);
 
     dock.appendChild(Object.assign(document.createElement('div'), { className: 'divider' }));
 
