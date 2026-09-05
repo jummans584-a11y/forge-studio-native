@@ -12663,12 +12663,30 @@
       // showing up with no attached mesh.
       const skinCount = (skinsText.match(/^Deformer: \d+, "Deformer::skin"/gm) || []).length;
       const clusterCount = (skinsText.match(/^Deformer: \d+, "SubDeformer::cluster/gm) || []).length;
-      doc += 'Definitions: {\n  Version: 100\n  Count: ' + (bones.length + nodeAttrCount + meshBlocks.length + meshes.length + skinCount + clusterCount) + '\n';
+      // BUGFIX (body collapses onto the skeleton after export — texture shows, mesh doesn't):
+      // buildFbxMaterialBlock() writes one "Video" (the embedded PNG clip) and one "Texture" node
+      // per textured mesh straight into the Objects block, but this Definitions block never
+      // declared their counts. Godot's ufbx importer (and several other strict FBX readers) use
+      // Definitions' per-type counts as an upfront sanity check while streaming Objects; when the
+      // declared counts don't match what's actually there, it falls back to a defensive/partial
+      // parse — the simple LimbNode skeleton still comes through (which is why the bones kept
+      // showing), but the heavier Geometry/Deformer(skin) objects right after it get silently
+      // skipped, leaving the mesh with no skin binding at all. A skinned mesh with no skin cluster
+      // renders at its Model's own local transform, which was intentionally zeroed out (see
+      // buildFbxMeshGeometryAndModel — real placement normally comes from the skin) — so the whole
+      // body collapses to a point at the skeleton root instead of following the bones. This only
+      // started showing up once texture embedding began adding Video/Texture nodes; exports with
+      // no texture (no Video/Texture nodes) never hit the mismatch, which is why re-merging
+      // animation without a texture fix looked fine before.
+      // texturedMeshCount is already computed above (in the materialsText build loop).
+      doc += 'Definitions: {\n  Version: 100\n  Count: ' + (bones.length + nodeAttrCount + meshBlocks.length + meshes.length + skinCount + clusterCount + texturedMeshCount * 2) + '\n';
       doc += '  ObjectType: "GlobalSettings" { Count: 1 }\n';
       if (nodeAttrCount) doc += '  ObjectType: "NodeAttribute" { Count: ' + nodeAttrCount + ' }\n';
       doc += '  ObjectType: "Model" { Count: ' + (bones.length + meshBlocks.length) + ' }\n';
       doc += '  ObjectType: "Geometry" { Count: ' + meshBlocks.length + ' }\n';
       doc += '  ObjectType: "Material" { Count: ' + meshes.length + ' }\n';
+      if (texturedMeshCount) doc += '  ObjectType: "Video" { Count: ' + texturedMeshCount + ' }\n';
+      if (texturedMeshCount) doc += '  ObjectType: "Texture" { Count: ' + texturedMeshCount + ' }\n';
       if (skinCount) doc += '  ObjectType: "Deformer" { Count: ' + (skinCount + clusterCount) + ' }\n';
       doc += '}\n\n';
       doc += 'Objects: {\n' + bonesText + meshesText + materialsText + skinsText + animText + '}\n\n';
@@ -13625,6 +13643,37 @@
         eye.title = mesh.visible ? 'Hide this piece' : 'Show this piece';
         eye.onclick = () => { mesh.visible = !mesh.visible; renderBodyList(); requestRender(); };
         row.appendChild(eye);
+
+        // Permanent delete for an original imported piece (e.g. clothing meshes that came in
+        // fused with the body in the same file) — separate from Hide above: Hide already keeps a
+        // piece out of export (exportFBX/exportGLB both skip invisible meshes), but the mesh stays
+        // loaded and can pop back into view from the Objects list. This actually detaches it from
+        // charRoot. Skinning/skeleton is untouched — the mesh is only removed from the render
+        // hierarchy, its bones and every other piece's binding stay exactly as they were, and the
+        // animation you've built up keeps playing on whatever pieces remain. Undoable, same as
+        // every other delete in this dock (↶ top bar).
+        const bDel = document.createElement('button'); bDel.className = 'iconmini';
+        bDel.textContent = '🗑';
+        bDel.title = 'Delete this piece for good (e.g. a clothing mesh fused into the import) — Undo (↶ top bar) brings it back';
+        bDel.onclick = () => {
+          const meshParent = mesh.parent;
+          if (!meshParent) return;
+          if (selectedBodyMesh === mesh) selectedBodyMesh = null;
+          const wasGizmoTarget = gizmo.object === mesh;
+          if (wasGizmoTarget) gizmo.detach();
+          meshParent.remove(mesh);
+          const pmIdx = paintMeshes.findIndex(p => p.mesh === mesh);
+          const pmEntry = pmIdx !== -1 ? paintMeshes[pmIdx] : null;
+          if (pmIdx !== -1) paintMeshes.splice(pmIdx, 1);
+          pushObjHistory({
+            label: 'delete ' + (mesh.name || 'body piece'),
+            undo: () => { meshParent.add(mesh); if (pmEntry) paintMeshes.splice(Math.min(pmIdx, paintMeshes.length), 0, pmEntry); refreshUI(); renderBodyList(); },
+            redo: () => { if (mesh.parent) mesh.parent.remove(mesh); const i2 = paintMeshes.indexOf(pmEntry); if (i2 !== -1) paintMeshes.splice(i2, 1); refreshUI(); renderBodyList(); },
+          });
+          toast('Deleted "' + (mesh.name || 'that piece') + '" — Undo (↶ top bar) brings it back.', 2400);
+          refreshUI(); renderBodyList();
+        };
+        row.appendChild(bDel);
 
         bodyListWrap.appendChild(row);
       });
