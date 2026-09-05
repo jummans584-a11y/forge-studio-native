@@ -4279,6 +4279,29 @@
       const sourceBones = collectBones(obj);
       const built = buildRetargetBoneMap(sourceBones, targetBones);
       matchStats = { matched: built.matched, total: built.total };
+      // BUGFIX (mesh exploding/ballooning after export): a Skeleton's boneInverses are only
+      // meaningful paired with the EXACT bone objects they were computed for — each one encodes
+      // "that specific bone's world matrix at bind time". The old code kept the outfit mesh's OWN
+      // original boneInverses (computed for ITS OWN source rig) but swapped in the BODY's bone
+      // objects (newBones) instead. Two different rigs almost never share identical bone world
+      // matrices (different rest pose, proportions, or just a different exported scale), so every
+      // vertex ended up skinned through a mismatched inverse-bind matrix — harmless-looking in
+      // Forge Studio's own live view (three.js is forgiving here) but catastrophic once re-parsed
+      // by a stricter importer (Blender/Godot), which is exactly the "exploded" / "ballooned"
+      // geometry seen after export. Fix: source each bone's inverse from the TARGET skeleton's own
+      // existing boneInverses (the body mesh already skinned onto these exact bone objects) — that
+      // is the only inverse-bind data that's actually valid for newBones. Fall back to computing a
+      // fresh inverse from the bone's current world matrix only if no reference body skeleton is
+      // found yet (e.g. attaching outfit before any body mesh loaded).
+      let targetBoneInverseByName = null;
+      const refSkinned = [];
+      charRoot.traverse(o => { if (o.isSkinnedMesh && o !== mesh) refSkinned.push(o); });
+      if (refSkinned.length) {
+        targetBoneInverseByName = new Map();
+        refSkinned[0].skeleton.bones.forEach((b, i) => {
+          if (!targetBoneInverseByName.has(b.name)) targetBoneInverseByName.set(b.name, refSkinned[0].skeleton.boneInverses[i]);
+        });
+      }
       skinned.forEach(mesh => {
         const oldBones = mesh.skeleton.bones;
         const newBones = oldBones.map(b => {
@@ -4286,7 +4309,11 @@
           return mappedName ? targetByName.get(mappedName) : null;
         });
         if (newBones.some(b => !b)) { skippedSkinned++; return; } // this piece's rig didn't match well enough — leave it out rather than distort it
-        const newSkeleton = new THREE.Skeleton(newBones, mesh.skeleton.boneInverses);
+        const newInverses = newBones.map(b => {
+          const inv = targetBoneInverseByName && targetBoneInverseByName.get(b.name);
+          return inv ? inv.clone() : new THREE.Matrix4().copy(b.matrixWorld).invert();
+        });
+        const newSkeleton = new THREE.Skeleton(newBones, newInverses);
         mesh.bind(newSkeleton, mesh.bindMatrix);
         mesh.skinning = true;
         charRoot.attach(mesh); // reparents + auto-removes mesh from obj, preserving its world transform
@@ -12522,6 +12549,7 @@
       const bones = collectBones(root);
       const boneModelIds = new Map();
       let bonesText = '';
+      let nodeAttrCount = 0;
       const boneConnections = [];
       const boneById = new Map();
       bones.forEach(b => {
@@ -12529,6 +12557,15 @@
         boneModelIds.set(b, built.id);
         boneById.set(b, built.id);
         bonesText += built.text;
+        // NodeAttribute (Type "Skeleton"/"LimbNode") wired to the Model via "OO" — several strict
+        // FBX readers (Godot's ufbx among them) use this to positively identify a LimbNode Model as
+        // an actual skeleton joint rather than a generic empty transform node; without it some
+        // importers still show the bone hierarchy (why the T-pose/skeleton lines still appeared)
+        // but fail to treat it as a proper skinnable joint, or drop it from the parsed scene.
+        const attrId = nextFbxId();
+        bonesText += 'NodeAttribute: ' + attrId + ', "NodeAttribute::' + fbxSafeName(b.name) + '", "LimbNode" {\n  TypeFlags: "Skeleton"\n}\n';
+        boneConnections.push({ type: 'OO', a: attrId, b: built.id });
+        nodeAttrCount++;
       });
       bones.forEach(b => {
         const parentId = bones.includes(b.parent) ? boneById.get(b.parent) : 0; // 0 = scene root
@@ -12618,6 +12655,22 @@
       doc += '; FBX 7.4.0 project file\n; Written by Forge Studio (hand-written ASCII FBX — mesh + skeleton + animation + embedded skin texture)\n\n';
       doc += 'FBXHeaderExtension: {\n  FBXHeaderVersion: 1003\n  FBXVersion: 7400\n  CreationTimeStamp: {\n    Version: 1000\n    Year: ' + now.getFullYear() + '\n    Month: ' + (now.getMonth() + 1) + '\n    Day: ' + now.getDate() + '\n    Hour: ' + now.getHours() + '\n    Minute: ' + now.getMinutes() + '\n    Second: ' + now.getSeconds() + '\n    Millisecond: 0\n  }\n  Creator: "Forge Studio"\n}\n\n';
       doc += 'GlobalSettings: {\n  Version: 1000\n  Properties70: {\n    P: "UpAxis", "int", "Integer", "",1\n    P: "UpAxisSign", "int", "Integer", "",1\n    P: "FrontAxis", "int", "Integer", "",2\n    P: "FrontAxisSign", "int", "Integer", "",1\n    P: "CoordAxis", "int", "Integer", "",0\n    P: "CoordAxisSign", "int", "Integer", "",1\n    P: "UnitScaleFactor", "double", "Number", "",1\n  }\n}\n\n';
+      // Definitions block was entirely missing before — several FBX readers (including Godot's
+      // ufbx-based importer) use these per-type counts as an upfront sanity check while streaming
+      // the Objects block; without it, some readers fall back to a more defensive/partial parse
+      // (e.g. skeleton hierarchy comes through since LimbNodes are simple, but Geometry/Deformer
+      // objects — the actual mesh + skinning — get silently skipped), which matches a skeleton
+      // showing up with no attached mesh.
+      const skinCount = (skinsText.match(/^Deformer: \d+, "Deformer::skin"/gm) || []).length;
+      const clusterCount = (skinsText.match(/^Deformer: \d+, "SubDeformer::cluster/gm) || []).length;
+      doc += 'Definitions: {\n  Version: 100\n  Count: ' + (bones.length + nodeAttrCount + meshBlocks.length + meshes.length + skinCount + clusterCount) + '\n';
+      doc += '  ObjectType: "GlobalSettings" { Count: 1 }\n';
+      if (nodeAttrCount) doc += '  ObjectType: "NodeAttribute" { Count: ' + nodeAttrCount + ' }\n';
+      doc += '  ObjectType: "Model" { Count: ' + (bones.length + meshBlocks.length) + ' }\n';
+      doc += '  ObjectType: "Geometry" { Count: ' + meshBlocks.length + ' }\n';
+      doc += '  ObjectType: "Material" { Count: ' + meshes.length + ' }\n';
+      if (skinCount) doc += '  ObjectType: "Deformer" { Count: ' + (skinCount + clusterCount) + ' }\n';
+      doc += '}\n\n';
       doc += 'Objects: {\n' + bonesText + meshesText + materialsText + skinsText + animText + '}\n\n';
       doc += connText + '\n';
       if (stackIds.length) {
