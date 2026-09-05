@@ -2832,6 +2832,15 @@
           mats.forEach(m => { if (m) m.needsUpdate = true; });
         }
       });
+      // BUGFIX: re-flag every live paint canvas's own CanvasTexture too, not just whatever
+      // materials happen to hang off charRoot/terrainRoot — on Android, coming back from the
+      // background is exactly when a canvas's GPU-side copy can go stale/blank, and painting
+      // continues to look fine on-screen only because these are the textures actually driving
+      // the character/terrain paint, so flag them straight after any resume, not just after a
+      // WebGL context-lost event (which doesn't always fire for this).
+      paintMeshes.forEach(e => { if (e.texture) e.texture.needsUpdate = true; });
+      terrainPaintMeshes.forEach(e => { if (e.texture) e.texture.needsUpdate = true; });
+      if (terrainTexture) terrainTexture.needsUpdate = true;
     }
   });
 
@@ -3602,7 +3611,7 @@
   function makeMeasureLabelSprite(text, accent) {
     const canvas = document.createElement('canvas');
     canvas.width = 320; canvas.height = 96;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = 'rgba(18,18,22,0.88)';
     ctx.strokeStyle = accent || '#ff7a3d';
     ctx.lineWidth = 4;
@@ -3781,7 +3790,7 @@
   function makeBoneNameSprite(text) {
     const canvas = document.createElement('canvas');
     canvas.width = 256; canvas.height = 72;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.fillStyle = 'rgba(14,15,18,0.82)';
     ctx.strokeStyle = '#6fc3ff'; ctx.lineWidth = 3;
     const r = 12;
@@ -4040,7 +4049,7 @@
     const canvasTex = document.createElement('canvas');
     canvasTex.width = TEX_SIZE;
     canvasTex.height = TEX_SIZE;
-    const ctx = canvasTex.getContext('2d');
+    const ctx = canvasTex.getContext('2d', { willReadFrequently: true });
 
     // Seed the new paintable canvas with whatever the mesh already looked like — an imported map's
     // or character's own baseColor texture — instead of wiping it to flat gray. Blanking it here
@@ -7646,7 +7655,7 @@
     terrainCanvasEl = document.createElement('canvas');
     terrainCanvasEl.width = TEX_SIZE;
     terrainCanvasEl.height = TEX_SIZE;
-    terrainCtx = terrainCanvasEl.getContext('2d');
+    terrainCtx = terrainCanvasEl.getContext('2d', { willReadFrequently: true });
     terrainCtx.fillStyle = '#5c7a52';
     terrainCtx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
     terrainTexture = new THREE.CanvasTexture(terrainCanvasEl);
@@ -7913,7 +7922,7 @@
     const GEN_SIZE = 256;
     const gray = _fractalNoiseGrid(terrainHeightmapGenSeed, GEN_SIZE, terrainHeightmapGenScale, terrainHeightmapGenOctaves);
     const off = document.createElement('canvas'); off.width = GEN_SIZE; off.height = GEN_SIZE;
-    const octx = off.getContext('2d');
+    const octx = off.getContext('2d', { willReadFrequently: true });
     const imgData = octx.createImageData(GEN_SIZE, GEN_SIZE);
     for (let i = 0; i < GEN_SIZE * GEN_SIZE; i++) {
       const v = gray[i];
@@ -8089,7 +8098,7 @@
     if (!terrainCtx || !terrainCanvasEl) {
       terrainCanvasEl = document.createElement('canvas');
       terrainCanvasEl.width = TEX_SIZE; terrainCanvasEl.height = TEX_SIZE;
-      terrainCtx = terrainCanvasEl.getContext('2d');
+      terrainCtx = terrainCanvasEl.getContext('2d', { willReadFrequently: true });
     }
     const blank = terrainCtx.getImageData(0, 0, 1, 1).data;
     if (blank[3] === 0) { terrainCtx.fillStyle = '#5c7a52'; terrainCtx.fillRect(0, 0, TEX_SIZE, TEX_SIZE); }
@@ -8119,7 +8128,7 @@
     } else {
       const off = document.createElement('canvas');
       off.width = res; off.height = res;
-      const octx = off.getContext('2d');
+      const octx = off.getContext('2d', { willReadFrequently: true });
       // FIX: canvas 2D defaults imageSmoothingEnabled to true, which runs the source image through
       // the browser's own bilinear/bicubic resampler here — completely outside the Smoothness slider's
       // control, and even active when Smoothness is 0. That hidden blur was what made small pits/hills
@@ -8677,7 +8686,7 @@
 
   function makePaintLayer(name, w, h) {
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    return { id: 'L' + Math.random().toString(36).slice(2, 9), name, canvas: c, ctx: c.getContext('2d'), opacity: 1, visible: true, locked: false };
+    return { id: 'L' + Math.random().toString(36).slice(2, 9), name, canvas: c, ctx: c.getContext('2d', { willReadFrequently: true }), opacity: 1, visible: true, locked: false };
   }
   // Wraps the primitive ground's single terrainCtx/terrainTexture pair so it can be handled by the
   // same layer-stack code as a custom-mesh paint entry (which already owns its own .ctx/.texture).
@@ -8901,7 +8910,7 @@
   function stampBrushDab(destCtx, x, y, radius, fillStyle, erase) {
     const size = Math.max(4, Math.ceil(radius * 2) + 2);
     if (!_brushScratch || _brushScratch.width < size) { _brushScratch = document.createElement('canvas'); _brushScratch.width = _brushScratch.height = size; }
-    const sctx = _brushScratch.getContext('2d');
+    const sctx = _brushScratch.getContext('2d', { willReadFrequently: true });
     sctx.clearRect(0, 0, _brushScratch.width, _brushScratch.height);
     const lx = size / 2, ly = size / 2;
     sctx.save();
@@ -8986,7 +8995,7 @@
         _smudgeCarry = layer.ctx.getImageData(sampleX, sampleY, size, size);
       } else {
         const tmp = document.createElement('canvas'); tmp.width = size; tmp.height = size;
-        tmp.getContext('2d').putImageData(_smudgeCarry, 0, 0);
+        tmp.getContext('2d', { willReadFrequently: true }).putImageData(_smudgeCarry, 0, 0);
         layer.ctx.save();
         layer.ctx.globalAlpha = Math.max(0, Math.min(1, brushOpacity * brushStrength));
         layer.ctx.beginPath(); layer.ctx.arc(x, y, radius, 0, Math.PI * 2); layer.ctx.clip();
@@ -9056,7 +9065,7 @@
     if (!slot._dirty && _slotPatternCache.has(cacheKey)) return _slotPatternCache.get(cacheKey);
     const size = 128;
     const c = document.createElement('canvas'); c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     if (slot.img) {
       ctx.drawImage(slot.img, 0, 0, size, size);
     } else {
@@ -11102,7 +11111,7 @@
         const size = parseInt(targetSize, 10);
         if (img.width <= size && img.height <= size) return;
         const c = document.createElement('canvas'); c.width = size; c.height = size;
-        c.getContext('2d').drawImage(img, 0, 0, size, size);
+        c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, size, size);
         const tex = new THREE.CanvasTexture(c);
         tex.encoding = THREE.sRGBEncoding;
         tex.wrapS = mat.map.wrapS; tex.wrapT = mat.map.wrapT;
@@ -11313,7 +11322,7 @@
   function setDenseGroundTextureImage(img) {
     const size = 256;
     const c = document.createElement('canvas'); c.width = size; c.height = size;
-    const cx = c.getContext('2d');
+    const cx = c.getContext('2d', { willReadFrequently: true });
     cx.drawImage(img, 0, 0, size, size);
     denseGroundTex.img = img;
     denseGroundTex.imgData = cx.getImageData(0, 0, size, size);
@@ -12305,6 +12314,19 @@
     const invMats = meshBlock.mesh.skeleton.boneInverses;
     const meshWorld = meshBlock.mesh.matrixWorld;
 
+    // Some imported/re-loaded meshes store skinIndex/skinWeight as an InterleavedBufferAttribute
+    // rather than a plain BufferAttribute — that class has getX/getY/getZ/getW but no generic
+    // getComponent(), which is what was throwing "getComponent is not a function" on FBX export.
+    // This helper works for both attribute types.
+    const attrComponent = (attr, v, k) => {
+      switch (k) {
+        case 0: return attr.getX(v);
+        case 1: return attr.getY(v);
+        case 2: return attr.getZ(v);
+        default: return attr.getW(v);
+      }
+    };
+
     for (let bi = 0; bi < bones.length; bi++) {
       const boneModelId = boneModelIds.get(bones[bi]);
       if (boneModelId === undefined) continue; // bone not part of the exported skeleton set (shouldn't happen)
@@ -12312,8 +12334,8 @@
       const wts = [];
       for (let v = 0; v < meshBlock.vertCount; v++) {
         for (let k = 0; k < 4; k++) {
-          const bIndex = meshBlock.skinIdx.getComponent(v, k);
-          const w = meshBlock.skinWt.getComponent(v, k);
+          const bIndex = attrComponent(meshBlock.skinIdx, v, k);
+          const w = attrComponent(meshBlock.skinWt, v, k);
           if (bIndex === bi && w > 0.0001) { idxs.push(v); wts.push(w); }
         }
       }
@@ -12432,7 +12454,7 @@
       try {
         const c = document.createElement('canvas');
         c.width = img.width || img.naturalWidth; c.height = img.height || img.naturalHeight;
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0, c.width, c.height);
         return { dataUrl: c.toDataURL('image/png'), color: null };
       } catch (e) { /* cross-origin/tainted canvas — fall back to flat color below */ }
     }
@@ -14481,7 +14503,7 @@
         bFbxAll.textContent = selectedCount > 0 && selectedCount < characterAnimations.length
           ? 'Export character + ' + selectedCount + ' selected animation' + (selectedCount === 1 ? '' : 's') + ' (FBX)'
           : 'Export character + all animations (FBX)';
-        bFbxAll.title = 'Mesh + skeleton + every checked animation baked into one .fbx. No painted texture (use GLB for that).';
+        bFbxAll.title = 'Mesh + skeleton + every checked animation + your painted texture, baked into one .fbx.';
         if (characterAnimations.length && selectedCount === 0) bFbxAll.disabled = true;
         bFbxAll.onclick = () => {
           const chosen = characterAnimations.filter(a => a.selected !== false);
