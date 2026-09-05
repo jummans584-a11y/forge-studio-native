@@ -1711,23 +1711,23 @@
   <div id="block-preview-hint">Rotate / pinch-zoom to inspect this shape</div>
   <div id="block-preview-bar"></div>
 
-  <input type="file" id="file-input-fbx" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
+  <input type="file" id="file-input-fbx" accept="*/*" multiple />
   <!-- PHASE 2 — Character B gets its own independent file picker so importing it can never touch
        Character A's <input>/its in-flight selection (sharing one <input> would mean whichever import
        was mid-pick last "owns" the element's onchange target). -->
-  <input type="file" id="file-input-fbx-b" accept=".fbx,.glb,.gltf,.obj" multiple />
+  <input type="file" id="file-input-fbx-b" accept="*/*" multiple />
   <input type="file" id="file-input-image" accept="image/*" multiple />
-  <input type="file" id="file-input-anims" accept=".fbx,.glb,.gltf,.obj" multiple />
+  <input type="file" id="file-input-anims" accept="*/*" multiple />
   <input type="file" id="file-input-heightmap" accept="image/*" />
   <input type="file" id="file-input-groundtex" accept="image/*" />
   <input type="file" id="file-input-brushtex" accept="image/*" multiple />
   <input type="file" id="file-input-groundslot-bulk" accept="image/*" multiple />
-  <input type="file" id="file-input-terrain-model" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
-  <input type="file" id="file-input-replace" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
-  <input type="file" id="file-input-place-on-cube" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
+  <input type="file" id="file-input-terrain-model" accept="*/*" multiple />
+  <input type="file" id="file-input-replace" accept="*/*" multiple />
+  <input type="file" id="file-input-place-on-cube" accept="*/*" multiple />
   <input type="file" id="file-input-project" accept=".json,application/json" />
-  <input type="file" id="file-input-library-add" accept=".fbx,.glb,.gltf,.obj" multiple />
-  <input type="file" id="file-input-outfit" accept=".fbx,.glb,.gltf" multiple />
+  <input type="file" id="file-input-library-add" accept="*/*" multiple />
+  <input type="file" id="file-input-outfit" accept="*/*" multiple />
 </div>
 
 <!-- Vendor libs: loaded from jsDelivr CDN, pinned to three.js r128 to match this app's code.
@@ -5940,7 +5940,7 @@
 
       const baseColor = assignments.find(a => a.slot === 'map');
       const materialSlots = assignments.filter(a => a.slot !== 'map');
-      const needsStandard = materialSlots.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
+      const needsStandard = materialSlots.some(a => ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
 
       // --- Base Color: painted straight into the canvas every paintMeshes entry already owns ---
       let canvasBefore = null, canvasAfter = null;
@@ -8850,7 +8850,7 @@
 
       const baseColor = assignments.find(a => a.slot === 'map');
       const materialSlots = assignments.filter(a => a.slot !== 'map');
-      const needsStandard = materialSlots.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
+      const needsStandard = materialSlots.some(a => ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
 
       if (baseColor) {
         brushTextureImg = baseColor.tex.image;
@@ -9171,7 +9171,7 @@
     const slot = activeGroundSlot();
     if (!slot || !slot._pbr || !Object.keys(slot._pbr).length) return;
     const groundMeshes = activePaintMeshTargets();
-    const needsStandard = Object.keys(slot._pbr).some(s => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(s));
+    const needsStandard = Object.keys(slot._pbr).some(s => ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(s));
     groundMeshes.forEach(mesh => {
       if (needsStandard) ensureStandardMaterial(mesh);
       const mat = firstMaterialOf(mesh);
@@ -10935,7 +10935,7 @@
         } catch (err) { skipped.push(f.name); }
       }
       if (!assignments.length) { toast('Could not recognize any of those images as textures.', 2400); return; }
-      const needsStandard = assignments.some(a => ['roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
+      const needsStandard = assignments.some(a => ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'displacementMap'].includes(a.slot));
       const before = objs.map(entry => {
         const mat = firstMaterialOf(entry.mesh);
         return { entry, wasMat: mat, snap: null };
@@ -12216,13 +12216,12 @@
   // three.js ships an FBX *loader* (that's how characters get imported) but no official FBX
   // *exporter* at all — GLTFExporter/OBJExporter above are the only exporters the library gives us.
   // This hand-writes a minimal but real ASCII FBX 7.4 file: mesh geometry, the skeleton (every
-  // bone as a LimbNode), the skin binding (per-vertex bone weights) and every selected animation
-  // clip baked to sampled keyframes on each bone. It's built to match what Blender / Godot / Unity /
-  // Unreal's FBX importers expect for a "character + animation" rig.
-  // Textures do NOT travel with this FBX (same tradeoff this app's existing OBJ export already
-  // makes) — embedding image bytes into ASCII FBX reliably is a much bigger job. Use GLB when you
-  // need the painted texture to come along; use this FBX export for the mesh + rig + animation
-  // themselves, e.g. dropping straight into a Blender/Unity/Unreal FBX-based pipeline.
+  // bone as a LimbNode), the skin binding (per-vertex bone weights), every selected animation
+  // clip baked to sampled keyframes on each bone, AND a Material + embedded texture per mesh (its
+  // live paint canvas, base64-encoded straight into the file as a Video "Clip" — see
+  // buildFbxMaterialBlock) so the character's painted skin actually comes along, the same way GLB's
+  // embedImages already does. It's built to match what Blender / Godot / Unity / Unreal's FBX
+  // importers expect for a "textured character + animation" rig.
   // ============================================================
   const FBX_TICKS_PER_SECOND = 46186158000; // FBX 7.x internal time unit: exactly one second
   function fbxTimeFromSeconds(s) { return Math.round(s * FBX_TICKS_PER_SECOND); }
@@ -12402,6 +12401,91 @@
     return { text: s, acnId, curveIds };
   }
 
+  // ---------- FBX MATERIAL + EMBEDDED TEXTURE ("skin") ----------
+  // The exporter used to emit geometry/skin/animation only, with no Material/Texture node at all —
+  // every importer then fell back to a default gray material, which is why the character's painted
+  // skin always came out missing after an FBX export. This builds one real Material per mesh and,
+  // whenever that mesh actually has a texture (its live paint canvas, or — for meshes that never
+  // got a paint canvas, e.g. the too-dense fallback — whatever base-color image its own material
+  // already carries), embeds it directly into the FBX as a base64 Video "Clip" wired to a Texture
+  // wired to that Material's DiffuseColor. Nothing is left as an external file reference, so the
+  // texture travels inside the single .fbx exactly like GLB's embedImages already does.
+  function hexToFbxRgb(hex) {
+    hex = String(hex || '').replace('#', '');
+    if (hex.length !== 6) return '1,1,1';
+    const r = parseInt(hex.substr(0, 2), 16) / 255;
+    const g = parseInt(hex.substr(2, 2), 16) / 255;
+    const b = parseInt(hex.substr(4, 2), 16) / 255;
+    return [r, g, b].map(fbxNum).join(',');
+  }
+  // Finds the best available base-color image for `mesh` and returns it as a PNG data URL — the
+  // live paint canvas first (what the person actually painted), falling back to the original
+  // imported material's own map image for meshes that never got a paint canvas at all.
+  function getMeshExportTexture(mesh) {
+    const entry = paintMeshes.find(p => p.mesh === mesh);
+    if (entry && entry.canvasEl) {
+      try { return { dataUrl: entry.canvasEl.toDataURL('image/png'), color: null }; } catch (e) { /* fall through */ }
+    }
+    const mat = firstMaterialOf(mesh);
+    const img = mat && mat.map && mat.map.image;
+    if (img && ((img.width || img.naturalWidth) > 0)) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.width || img.naturalWidth; c.height = img.height || img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        return { dataUrl: c.toDataURL('image/png'), color: null };
+      } catch (e) { /* cross-origin/tainted canvas — fall back to flat color below */ }
+    }
+    return { dataUrl: null, color: mat && mat.color ? ('#' + mat.color.getHexString()) : null };
+  }
+  function buildFbxMaterialBlock(mesh, idx) {
+    const matId = nextFbxId();
+    const safeName = 'mat' + idx;
+    const texInfo = getMeshExportTexture(mesh);
+    const diffuseColor = texInfo.color ? hexToFbxRgb(texInfo.color) : '1,1,1';
+    let text = 'Material: ' + matId + ', "Material::' + safeName + '", "" {\n';
+    text += '  Version: 102\n  ShadingModel: "Phong"\n  MultiLayer: 0\n';
+    text += '  Properties70: {\n';
+    text += '    P: "DiffuseColor", "Color", "", "A",' + diffuseColor + '\n';
+    text += '    P: "Diffuse", "Vector3D", "Vector", "",' + diffuseColor + '\n';
+    text += '    P: "AmbientColor", "Color", "", "A",0,0,0\n';
+    text += '    P: "SpecularColor", "Color", "", "A",0.2,0.2,0.2\n';
+    text += '    P: "ShininessExponent", "double", "Number", "",20\n';
+    text += '    P: "Opacity", "double", "Number", "",1\n';
+    text += '  }\n}\n';
+
+    const connections = [];
+    let hasTexture = false;
+    if (texInfo.dataUrl) {
+      const base64 = (texInfo.dataUrl.split(',')[1] || '');
+      if (base64) {
+        hasTexture = true;
+        const textureId = nextFbxId();
+        const videoId = nextFbxId();
+        const fname = safeName + '_diffuse.png';
+        text += 'Video: ' + videoId + ', "Video::' + safeName + '_tex", "Clip" {\n';
+        text += '  Type: "Clip"\n';
+        text += '  UseMipMap: 0\n';
+        text += '  Filename: "' + fname + '"\n';
+        text += '  RelativeFilename: "' + fname + '"\n';
+        text += '  Content: "' + base64 + '"\n';
+        text += '}\n';
+        text += 'Texture: ' + textureId + ', "Texture::' + safeName + '_tex", "" {\n';
+        text += '  Type: "TextureVideoClip"\n  Version: 202\n';
+        text += '  TextureName: "Texture::' + safeName + '_tex"\n';
+        text += '  Properties70: {\n    P: "UseMaterial", "bool", "", "",1\n  }\n';
+        text += '  Media: "Video::' + safeName + '_tex"\n';
+        text += '  FileName: "' + fname + '"\n';
+        text += '  RelativeFilename: "' + fname + '"\n';
+        text += '  ModelUVTranslation: 0,0\n  ModelUVScaling: 1,1\n';
+        text += '  Texture_Alpha_Source: "None"\n  Cropping: 0,0,0,0\n}\n';
+        connections.push({ type: 'OO', a: videoId, b: textureId });
+        connections.push({ type: 'OP', a: textureId, b: matId, p: 'DiffuseColor' });
+      }
+    }
+    return { text, matId, connections, hasTexture };
+  }
+
   // Assembles the full ASCII FBX 7.4 document for `root` (a character: skinned mesh(es) + skeleton)
   // plus every clip in `animClips`, and hands the resulting text to the normal save/share flow.
   function exportFBX(root, filename, animClips) {
@@ -12439,6 +12523,19 @@
         meshConnections.push({ type: 'OO', a: mb.modelId, b: 0 });
         const skin = buildFbxSkinBlock(mb, bones, boneModelIds);
         if (skin.text) { skinsText += skin.text; skin.connections.forEach(c => meshConnections.push(c)); }
+      });
+
+      // One Material per mesh, embedding that mesh's own painted texture (or original base-color
+      // image) directly into the file — see buildFbxMaterialBlock above. This is what actually puts
+      // the character's skin back onto an exported FBX instead of leaving it default-gray.
+      let materialsText = '';
+      let texturedMeshCount = 0;
+      meshes.forEach((m, i) => {
+        const built = buildFbxMaterialBlock(m, i);
+        materialsText += built.text;
+        meshConnections.push({ type: 'OO', a: built.matId, b: meshBlocks[i].modelId });
+        built.connections.forEach(c => meshConnections.push(c));
+        if (built.hasTexture) texturedMeshCount++;
       });
       // Root bones parent straight onto the scene (id 0) same as mesh Models above.
       bones.forEach(b => { if (!bones.includes(b.parent)) { /* already 0 via loop above */ } });
@@ -12496,10 +12593,10 @@
 
       const now = new Date();
       let doc = '';
-      doc += '; FBX 7.4.0 project file\n; Written by Forge Studio (hand-written ASCII FBX — mesh + skeleton + animation, no textures)\n\n';
+      doc += '; FBX 7.4.0 project file\n; Written by Forge Studio (hand-written ASCII FBX — mesh + skeleton + animation + embedded skin texture)\n\n';
       doc += 'FBXHeaderExtension: {\n  FBXHeaderVersion: 1003\n  FBXVersion: 7400\n  CreationTimeStamp: {\n    Version: 1000\n    Year: ' + now.getFullYear() + '\n    Month: ' + (now.getMonth() + 1) + '\n    Day: ' + now.getDate() + '\n    Hour: ' + now.getHours() + '\n    Minute: ' + now.getMinutes() + '\n    Second: ' + now.getSeconds() + '\n    Millisecond: 0\n  }\n  Creator: "Forge Studio"\n}\n\n';
       doc += 'GlobalSettings: {\n  Version: 1000\n  Properties70: {\n    P: "UpAxis", "int", "Integer", "",1\n    P: "UpAxisSign", "int", "Integer", "",1\n    P: "FrontAxis", "int", "Integer", "",2\n    P: "FrontAxisSign", "int", "Integer", "",1\n    P: "CoordAxis", "int", "Integer", "",0\n    P: "CoordAxisSign", "int", "Integer", "",1\n    P: "UnitScaleFactor", "double", "Number", "",1\n  }\n}\n\n';
-      doc += 'Objects: {\n' + bonesText + meshesText + skinsText + animText + '}\n\n';
+      doc += 'Objects: {\n' + bonesText + meshesText + materialsText + skinsText + animText + '}\n\n';
       doc += connText + '\n';
       if (stackIds.length) {
         doc += 'Takes: {\n  Current: "' + (clips[0] ? fbxSafeName(clips[0].name || 'anim0') : '') + '"\n}\n';
@@ -12508,7 +12605,8 @@
       const blob = new Blob([doc], { type: 'application/octet-stream' });
       downloadDataUrl(URL.createObjectURL(blob), filename);
       const animNote = clips.length ? (' with ' + clips.length + ' animation(s) baked in') : '';
-      toast('FBX exported' + animNote + ' (' + meshes.length + ' mesh part(s), ' + bones.length + ' bone(s)). Textures don\'t travel with FBX — use GLB export for the painted texture.', 5600);
+      const texNote = texturedMeshCount ? (', ' + texturedMeshCount + ' textured (skin embedded)') : ' — no texture found to embed, exported with a plain material';
+      toast('FBX exported' + animNote + ' (' + meshes.length + ' mesh part(s)' + texNote + ', ' + bones.length + ' bone(s)).', 5600);
     } catch (err) {
       console.error(err);
       toast('FBX export failed: ' + (err && err.message || 'unknown error') + ' — try GLB export instead.', 4200);
@@ -14411,7 +14509,7 @@
 
         const note3 = document.createElement('p');
         note3.style.cssText = 'font-size:11px;color:var(--ink-dim);margin:8px 2px 0;line-height:1.5;';
-        note3.textContent = 'GLB carries mesh, painted texture and every checked animation from the Animation tab, ready to drop into your Godot project — each animation becomes its own clip on the AnimationPlayer. FBX carries mesh + skeleton + every checked animation too (Blender/Unity/Unreal-friendly), but no painted texture — use GLB when you need the texture to travel with the file. "Animations only" skips the mesh/texture entirely and bundles just the checked animations, skeleton-only. "Skeleton only" is bones-only too, but with no animation at all — just the current bind pose, for handing off the rig shape itself. OBJ is geometry-only — no texture or animations travel with it, so use it only for engines that can\'t read glTF.';
+        note3.textContent = 'GLB carries mesh, painted texture and every checked animation from the Animation tab, ready to drop into your Godot project — each animation becomes its own clip on the AnimationPlayer. FBX carries mesh + skeleton + painted texture (embedded) + every checked animation too (Blender/Unity/Unreal-friendly). "Animations only" skips the mesh/texture entirely and bundles just the checked animations, skeleton-only. "Skeleton only" is bones-only too, but with no animation at all — just the current bind pose, for handing off the rig shape itself. OBJ is geometry-only — no texture or animations travel with it, so use it only for engines that can\'t read glTF.';
         dock.appendChild(note3);
       }
 
