@@ -3566,7 +3566,7 @@
       setTimeout(() => {
         parseModelBuffer(ext, reader.result, manager, finishWithObject, (err) => {
           console.error(err);
-          showLoadError('This model failed to parse in-browser.', (err && (err.message || String(err))) || '');
+          showLoadError('This model failed to parse in-browser.', fbxParseErrorDetail(err, file));
         });
       }, 30);
     };
@@ -5869,6 +5869,24 @@
   // Central model parser: dispatches to the right THREE.js loader by file extension.
   // buffer: ArrayBuffer (as read by FileReader.readAsArrayBuffer). Handles glb/gltf (binary/JSON),
   // fbx (binary/ASCII), and obj (plain text — decoded from the ArrayBuffer here).
+  // BUGFIX — the "This model failed to parse in-browser." dialog used to ALWAYS append the same
+  // "mobile browsers have limited memory / decimate your mesh" paragraph, no matter what the actual
+  // JS error said. That's genuinely true for an out-of-memory failure, but it's actively misleading
+  // for a real parser bug — e.g. "Cannot read properties of undefined (reading 'forEach')" is a
+  // TypeError thrown by the loader itself hitting a structural problem in the file, not a memory
+  // ceiling, and sending someone off to decimate their mesh for that just wastes their time. Only
+  // show the memory-specific advice when the error text (or file size) actually points that way;
+  // otherwise show the real error plus a hint that it's a structural/parser problem instead.
+  function fbxParseErrorDetail(err, file) {
+    const msg = (err && (err.message || String(err))) || 'Unknown error';
+    const sizeMB = file && file.size ? (file.size / (1024 * 1024)) : 0;
+    const looksLikeMemory = /memory|alloc|heap|out of memory/i.test(msg) || sizeMB > 60;
+    if (looksLikeMemory) {
+      return msg + '\n\nMobile browsers have limited memory. A dense mesh with embedded textures around 80–90MB often exceeds it.\n\nTry: in Blender, re-export with textures NOT embedded (uncheck "Embed Textures"), or Decimate the mesh, then re-export smaller. GLB usually loads more reliably than FBX on mobile. Or use "Load texture(s)…" instead and paint on the demo shape / a lighter model.';
+    }
+    return msg + '\n\nThis looks like a structural problem in the FBX file itself (not a memory limit) — the parser hit something it didn\'t expect partway through. If this file came out of Forge Studio\'s own FBX export, please retry the export (a fix for a known cause of this was just applied) — if it still fails, try GLB export instead, which is more forgiving on mobile.';
+  }
+
   function parseModelBuffer(ext, buffer, manager, onDone, onError) {
     try {
       if (ext === 'glb' || ext === 'gltf') {
@@ -5928,11 +5946,7 @@
       setTimeout(() => {
         parseModelBuffer(ext, reader.result, manager, finishWithObject, (err) => {
           console.error(err);
-          showLoadError(
-            'This model failed to parse in-browser.',
-            (err && (err.message || String(err))) +
-            '\n\nMobile browsers have limited memory. A dense mesh with embedded textures around 80–90MB often exceeds it.\n\nTry: in Blender, re-export with textures NOT embedded (uncheck "Embed Textures"), or Decimate the mesh, then re-export smaller. GLB usually loads more reliably than FBX on mobile. Or use "Load texture(s)…" instead and paint on the demo shape / a lighter model.'
-          );
+          showLoadError('This model failed to parse in-browser.', fbxParseErrorDetail(err, file));
         });
       }, 30);
     };
@@ -12603,6 +12617,20 @@
       const animConnections = [];
       const clips = (animClips || []).filter(Boolean);
       const stackIds = [];
+      // BUGFIX (Godot shows skeleton but no mesh, and this app's own FBXLoader throws "Cannot read
+      // properties of undefined (reading 'forEach')", ONLY once animation clips are baked in):
+      // the Definitions block below declares per-type object counts for Model/Geometry/Material/
+      // Video/Texture/Deformer (see the big comment further down) but never declared any counts for
+      // AnimationStack/AnimationLayer/AnimationCurveNode/AnimationCurve, even though the Objects
+      // block always contains them whenever clips are exported. Strict readers (Godot's ufbx, and
+      // apparently three.js's own FBXLoader on this hand-written file) use these declared counts as
+      // a sanity check while streaming the Objects block; an undeclared type showing up partway
+      // through throws the same kind of parser off that the missing Geometry/Deformer counts used
+      // to (see below) — except this time it happens to corrupt/derail parsing of everything that
+      // comes AFTER the first animation object in the file, which is why plain (no-animation)
+      // exports were fine but combined character+animation exports were not. Track and declare
+      // these four counts exactly like every other object type already is.
+      let animStackCount = 0, animLayerCount = 0, animCurveNodeCount = 0, animCurveCount = 0;
       clips.forEach((clip, ci) => {
         const safeName = fbxSafeName(clip.name || ('anim' + ci));
         const stackId = nextFbxId();
@@ -12613,6 +12641,7 @@
         animText += 'AnimationLayer: ' + layerId + ', "AnimLayer::Base", "" {\n}\n';
         animConnections.push({ type: 'OO', a: layerId, b: stackId });
         stackIds.push(stackId);
+        animStackCount++; animLayerCount++;
 
         // Only bones that this clip actually animates get baked — cheaper output, and keeps
         // untouched bones sitting at their existing bind pose in this clip.
@@ -12628,6 +12657,8 @@
           const r = buildFbxAnimCurveNode('R', 'rot', rec, 0);
           const sc = buildFbxAnimCurveNode('S', 'scl', rec, 0);
           animText += t.text + r.text + sc.text;
+          animCurveNodeCount += 3; // T, R, S
+          animCurveCount += 9; // X/Y/Z curve per T, R, S
           ['X', 'Y', 'Z'].forEach(axis => {
             animConnections.push({ type: 'OP', a: t.curveIds[axis], b: t.acnId, p: 'd|' + axis });
             animConnections.push({ type: 'OP', a: r.curveIds[axis], b: r.acnId, p: 'd|' + axis });
@@ -12679,7 +12710,14 @@
       // no texture (no Video/Texture nodes) never hit the mismatch, which is why re-merging
       // animation without a texture fix looked fine before.
       // texturedMeshCount is already computed above (in the materialsText build loop).
-      doc += 'Definitions: {\n  Version: 100\n  Count: ' + (bones.length + nodeAttrCount + meshBlocks.length + meshes.length + skinCount + clusterCount + texturedMeshCount * 2) + '\n';
+      // Total Count now also includes GlobalSettings itself (+1, matches the ObjectType line right
+      // below it) and every AnimationStack/Layer/CurveNode/Curve actually written to animText —
+      // previously both were left out of the sum, and the four animation types were never declared
+      // as ObjectType entries at all (see the BUGFIX comment above, near where clips are baked).
+      const totalDefCount = 1 /* GlobalSettings */ + bones.length + nodeAttrCount + meshBlocks.length + meshes.length
+        + skinCount + clusterCount + texturedMeshCount * 2
+        + animStackCount + animLayerCount + animCurveNodeCount + animCurveCount;
+      doc += 'Definitions: {\n  Version: 100\n  Count: ' + totalDefCount + '\n';
       doc += '  ObjectType: "GlobalSettings" { Count: 1 }\n';
       if (nodeAttrCount) doc += '  ObjectType: "NodeAttribute" { Count: ' + nodeAttrCount + ' }\n';
       doc += '  ObjectType: "Model" { Count: ' + (bones.length + meshBlocks.length) + ' }\n';
@@ -12688,6 +12726,10 @@
       if (texturedMeshCount) doc += '  ObjectType: "Video" { Count: ' + texturedMeshCount + ' }\n';
       if (texturedMeshCount) doc += '  ObjectType: "Texture" { Count: ' + texturedMeshCount + ' }\n';
       if (skinCount) doc += '  ObjectType: "Deformer" { Count: ' + (skinCount + clusterCount) + ' }\n';
+      if (animStackCount) doc += '  ObjectType: "AnimationStack" { Count: ' + animStackCount + ' }\n';
+      if (animLayerCount) doc += '  ObjectType: "AnimationLayer" { Count: ' + animLayerCount + ' }\n';
+      if (animCurveNodeCount) doc += '  ObjectType: "AnimationCurveNode" { Count: ' + animCurveNodeCount + ' }\n';
+      if (animCurveCount) doc += '  ObjectType: "AnimationCurve" { Count: ' + animCurveCount + ' }\n';
       doc += '}\n\n';
       doc += 'Objects: {\n' + bonesText + meshesText + materialsText + skinsText + animText + '}\n\n';
       doc += connText + '\n';
