@@ -12353,7 +12353,22 @@
 
     const bones = meshBlock.mesh.skeleton.bones;
     const invMats = meshBlock.mesh.skeleton.boneInverses;
-    const meshWorld = meshBlock.mesh.matrixWorld;
+    // BUGFIX (mesh collapses into a tiny blob/"wing" shape at the skeleton root once imported —
+    // skeleton itself looks the right size and pose, only the skin is wrong): this used to read
+    // meshBlock.mesh.matrixWorld here — the mesh's CURRENT world matrix. But `invMats` (skeleton
+    // .boneInverses) were captured ONCE, back when the file was first parsed and SkinnedMesh.bind()
+    // ran, in the model's ORIGINAL scale. Forge Studio then rescales the whole character afterward
+    // to fit the on-screen preview (see "if (maxDim > 10) obj.scale.setScalar(1.8 / maxDim)" at
+    // load time) — after that, mesh.matrixWorld reflects the NEW (often ~0.01x) display scale while
+    // invMats still reflect the ORIGINAL (1x) scale. FBX's skin formula needs Transform and
+    // TransformLink captured at the exact same moment/scale, so this mismatch is what was
+    // shrinking every vertex down onto the bones' (correctly-scaled) origin instead of following
+    // them. `mesh.bindMatrix` is the world matrix three.js itself froze at the ORIGINAL bind time
+    // (set once by SkinnedMesh.bind() and never touched again even if the mesh is rescaled later)
+    // — using it instead keeps Transform and TransformLink in the same original-scale space that
+    // invMats already are, which is also why bone hierarchy/geometry data (already in that same
+    // original scale) lines up correctly without needing any extra scale factor here at all.
+    const meshWorld = meshBlock.mesh.bindMatrix || meshBlock.mesh.matrixWorld;
 
     // Some imported/re-loaded meshes store skinIndex/skinWeight as an InterleavedBufferAttribute
     // rather than a plain BufferAttribute — that class has getX/getY/getZ/getW but no generic
@@ -12369,7 +12384,11 @@
     };
 
     for (let bi = 0; bi < bones.length; bi++) {
-      const boneModelId = boneModelIds.get(bones[bi]);
+      // boneModelIds is now keyed by bone NAME (see exportFBX's dedup fix) — this mesh's own
+      // skeleton.bones[bi] may be a duplicate copy of that name, so look it up by name, not by
+      // this specific object, and still use THIS mesh's own invMats[bi] below for the actual
+      // weight/TransformLink math (that part stays correct per-mesh, only the target id is shared).
+      const boneModelId = boneModelIds.get(bones[bi].name);
       if (boneModelId === undefined) continue; // bone not part of the exported skeleton set (shouldn't happen)
       const idxs = [];
       const wts = [];
@@ -12414,8 +12433,25 @@
   // Bakes one clip onto the given (already cloned/offline) bone hierarchy at a fixed sample rate,
   // returning { boneName: { times:[sec...], pos:[[x,y,z]...], rot:[[deg,deg,deg]...], scl:[[x,y,z]...] } }.
   function bakeClipToBoneSamples(bones, clip, sampleFps) {
+    // BUGFIX: this used to do `bones.filter(...).forEach(b => root.add(b))` — Object3D.add()
+    // removes the object from its CURRENT parent first, so that was reparenting the character's
+    // REAL, live root bone(s) out of the actual on-screen skeleton into this throwaway temp group,
+    // permanently — nothing ever put it back. Every clip clip baked during one export compounded
+    // this further. What we actually need is just something the AnimationMixer can target by name
+    // to read back the LOCAL position/quaternion/scale the clip writes (we never read world
+    // transforms here), so plain name-matched stand-ins are enough — clone lightweight placeholder
+    // nodes instead of touching the live bones at all.
     const root = new THREE.Group();
-    bones.filter(b => !bones.includes(b.parent)).forEach(b => root.add(b));
+    const standInByBone = new Map();
+    bones.forEach(b => {
+      const standIn = new THREE.Object3D();
+      standIn.name = b.name;
+      standIn.position.copy(b.position);
+      standIn.quaternion.copy(b.quaternion);
+      standIn.scale.copy(b.scale);
+      root.add(standIn);
+      standInByBone.set(b, standIn);
+    });
     const mixer = new THREE.AnimationMixer(root);
     const action = mixer.clipAction(clip);
     action.play();
@@ -12428,12 +12464,13 @@
       const t = Math.min(i * dt, clip.duration);
       mixer.setTime(t);
       bones.forEach(b => {
+        const standIn = standInByBone.get(b);
         const rec = out.get(b);
         rec.times.push(t);
-        rec.pos.push([b.position.x, b.position.y, b.position.z]);
-        const e = new THREE.Euler().setFromQuaternion(b.quaternion, 'XYZ');
+        rec.pos.push([standIn.position.x, standIn.position.y, standIn.position.z]);
+        const e = new THREE.Euler().setFromQuaternion(standIn.quaternion, 'XYZ');
         rec.rot.push([THREE.MathUtils.radToDeg(e.x), THREE.MathUtils.radToDeg(e.y), THREE.MathUtils.radToDeg(e.z)]);
-        rec.scl.push([b.scale.x, b.scale.y, b.scale.z]);
+        rec.scl.push([standIn.scale.x, standIn.scale.y, standIn.scale.z]);
       });
     }
     mixer.stopAllAction();
@@ -12560,15 +12597,34 @@
 
     try {
       _fbxIdSeed = 1000000;
-      const bones = collectBones(root);
-      const boneModelIds = new Map();
+      // BUGFIX (character sticks to / collapses onto a bone once imported into Godot — confirmed
+      // by inspecting an actual exported file): a character built from several mesh parts (common
+      // with Mixamo-style rigs) usually carries one FULL duplicate copy of the skeleton PER mesh
+      // part — collectBones() just walks the scene graph, so it faithfully returns every one of
+      // those duplicates as separate Bone objects (a real export showed 126 bone Models for only
+      // 65 unique names — some bones written out 5 times). Godot's Skeleton3D, like most engines,
+      // needs unique bone NAMES within one skeleton resource; fed duplicates, it collapses same-
+      // named bones into a single slot, so every mesh part whose cluster was pointing at a copy
+      // that DIDN'T survive that collapse gets dragged to wherever the surviving one ended up —
+      // exactly the "stuck to a bone" collapse being reported. Fix: write only ONE Model/
+      // NodeAttribute per unique bone NAME (first occurrence = canonical) and have every duplicate
+      // name resolve to that same Model id. Each mesh still reads its OWN skin weights/inverse-bind
+      // matrix from its own bone copy in buildFbxSkinBlock (nothing there needs to change) — only
+      // the bone Model id it points at is now shared, so nothing disagrees once Godot builds its
+      // one Skeleton3D. This also cuts a same-character export from ~126 bones down to the real
+      // ~65, which is most of why these files were also unnecessarily huge.
+      const allBones = collectBones(root);
+      const canonicalBoneByName = new Map(); // bone name -> representative bone object (first seen)
+      allBones.forEach(b => { if (!canonicalBoneByName.has(b.name)) canonicalBoneByName.set(b.name, b); });
+      const bones = Array.from(canonicalBoneByName.values());
+      const boneModelIds = new Map(); // keyed by NAME so every duplicate copy resolves to the same id
       let bonesText = '';
       let nodeAttrCount = 0;
       const boneConnections = [];
       const boneById = new Map();
       bones.forEach(b => {
         const built = buildFbxBoneModel(b);
-        boneModelIds.set(b, built.id);
+        boneModelIds.set(b.name, built.id);
         boneById.set(b, built.id);
         bonesText += built.text;
         // NodeAttribute (Type "Skeleton"/"LimbNode") wired to the Model via "OO" — several strict
@@ -12582,7 +12638,10 @@
         nodeAttrCount++;
       });
       bones.forEach(b => {
-        const parentId = bones.includes(b.parent) ? boneById.get(b.parent) : 0; // 0 = scene root
+        // b.parent is the REAL scene-graph parent, which may itself be a duplicate copy rather than
+        // the chosen canonical representative for that name — resolve by name, not object identity.
+        const parentCanonical = (b.parent && b.parent.isBone) ? canonicalBoneByName.get(b.parent.name) : null;
+        const parentId = parentCanonical ? boneById.get(parentCanonical) : 0; // 0 = scene root
         boneConnections.push({ type: 'OO', a: boneById.get(b), b: parentId });
       });
 
@@ -12652,7 +12711,7 @@
         clipBones.forEach(b => {
           const rec = samples.get(b);
           if (!rec) return;
-          const boneModelId = boneModelIds.get(b);
+          const boneModelId = boneModelIds.get(b.name);
           const t = buildFbxAnimCurveNode('T', 'pos', rec, 0);
           const r = buildFbxAnimCurveNode('R', 'rot', rec, 0);
           const sc = buildFbxAnimCurveNode('S', 'scl', rec, 0);
