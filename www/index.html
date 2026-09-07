@@ -11773,17 +11773,68 @@ window.__initForgeStudioApp = function () {
   // ============================================================
   // Export helpers
   // ============================================================
+  // ---------- Robust on-device file save ----------
+  // Every export in the app funnels through downloadDataUrl() below — model exports, PNG texture
+  // exports, project save, batch animation exports, all of it. The plain <a href="...">+click()
+  // browser-download trick it used to rely on exclusively is unreliable inside a Capacitor Android
+  // WebView: for bigger payloads it can silently do nothing at all, right after a success toast
+  // already fired — exactly the "message ke baad file export nahi ho raha" symptom (this is the
+  // same class of bug as the earlier GLB export bridge stall, just hit here via the browser-download
+  // path instead of the JS→native bridge path). When running inside the Capacitor app this now
+  // base64-encodes the data and writes it to Documents/ForgeStudio on-device via the Filesystem
+  // plugin, in chunks small enough that a single call across the bridge never stalls on a big
+  // payload — same chunking approach already proven for large GLB writes. Falls back to the old
+  // anchor-click download when there's no Capacitor bridge at all (e.g. this file opened directly
+  // in a desktop browser tab for testing).
+  const FS_WRITE_CHUNK_CHARS = 700000; // ~700KB of base64 text per bridge call
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result; // "data:<mime>;base64,AAAA..."
+        const comma = result.indexOf(',');
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Could not read file data.'));
+      reader.readAsDataURL(blob);
+    });
+  }
+  function writeViaCapacitorFS(fsPlugin, blob, filename) {
+    const path = 'ForgeStudio/' + filename;
+    return blobToBase64(blob).then((b64) => {
+      let offset = 0;
+      function writeNext(first) {
+        const chunk = b64.slice(offset, offset + FS_WRITE_CHUNK_CHARS);
+        offset += chunk.length;
+        const call = first
+          ? fsPlugin.writeFile({ path, data: chunk, directory: 'DOCUMENTS', recursive: true })
+          : fsPlugin.appendFile({ path, data: chunk, directory: 'DOCUMENTS' });
+        return call.then(() => { if (offset < b64.length) return writeNext(false); });
+      }
+      return writeNext(true).then(() => path);
+    });
+  }
   function downloadDataUrl(dataUrl, filename) {
-    const link = document.createElement('a');
-    link.download = filename;
-    link.href = dataUrl;
-    document.body.appendChild(link); // some mobile browsers only fire the download if the anchor is actually in the DOM
-    link.click();
-    link.remove();
-    // If this was a blob: URL (as opposed to a data: URL), release it once the browser has had a
-    // moment to actually start the download — callers used to leave these unrevoked, which leaked a
-    // small chunk of memory every single time Save Project / Export PNG etc. got used.
-    if (dataUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(dataUrl), 4000);
+    const fsPlugin = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Filesystem;
+    if (!fsPlugin) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = dataUrl;
+      document.body.appendChild(link); // some mobile browsers only fire the download if the anchor is actually in the DOM
+      link.click();
+      link.remove();
+      if (dataUrl.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(dataUrl), 4000);
+      return;
+    }
+    const cleanupUrl = dataUrl.startsWith('blob:') ? dataUrl : null;
+    fetch(dataUrl)
+      .then((res) => res.blob())
+      .then((blob) => writeViaCapacitorFS(fsPlugin, blob, filename))
+      .catch((err) => {
+        console.error(err);
+        toast('Saving "' + filename + '" failed: ' + (err && err.message ? err.message : 'unknown error'), 4200);
+      })
+      .then(() => { if (cleanupUrl) URL.revokeObjectURL(cleanupUrl); });
   }
 
   // Same export as exportGLB below, but resolves the raw ArrayBuffer via callback instead of
@@ -11933,13 +11984,7 @@ window.__initForgeStudioApp = function () {
       } else {
         blob = new Blob([result], { type: 'model/gltf-binary' });
       }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = filename;
-      document.body.appendChild(link); // some mobile browsers only fire the download if the anchor is actually in the DOM
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      downloadDataUrl(URL.createObjectURL(blob), filename);
       const fixNote = (preExportFix.missingTex || preExportFix.brightened) ? (' (cleaned up ' + (preExportFix.missingTex + preExportFix.brightened) + ' broken material reference(s) first)') : '';
       const animNote = (animClips && animClips.length) ? (' with ' + animClips.length + ' animation(s) embedded — they will show up as separate clips on the AnimationPlayer in Godot.') : '.';
       const colTotal = (collisionNaming.applied || 0) + (collisionNaming.convexApplied || 0);
