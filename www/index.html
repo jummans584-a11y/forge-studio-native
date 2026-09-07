@@ -5565,6 +5565,7 @@
       const reader = new FileReader();
       reader.onload = () => {
         const niceName = file.name.replace(/\.(fbx|glb|gltf)$/i, '');
+        ensureModelLoaderReady(ext).then(() => {
         if (isGltf) {
           try {
             new THREE.GLTFLoader().parse(reader.result, '', (gltf) => {
@@ -5592,6 +5593,10 @@
             failed++; setTimeout(() => processNext(i + 1), 10);
           }
         }
+        }, (err) => {
+          console.error('Loader could not be fetched for', file.name, err);
+          failed++; setTimeout(() => processNext(i + 1), 10);
+        });
       };
       reader.onerror = () => { failed++; processNext(i + 1); };
       reader.readAsArrayBuffer(file);
@@ -6050,6 +6055,66 @@
     loadCharacterObject(group, 'Demo sphere');
   }
 
+  // ROBUSTNESS FIX: every loader class (FBXLoader, OBJLoader, GLTFLoader, and FBXLoader's own
+  // fflate dependency) is fetched once via a plain <script> tag when the PAGE loads. If any single
+  // one of those requests drops (flaky mobile data, a CDN edge having an off moment, WebView
+  // aggressively caching a broken response) that specific loader is simply undefined for the rest
+  // of the session — nothing ever retries it, so every import of that format fails from then on
+  // even once the connection is fine again, while formats whose script DID load keep working (a
+  // GLB working while FBX doesn't is exactly this: GLTFLoader.js happened to load, FBXLoader.js or
+  // fflate didn't). This checks the actual class exists right before each use and, if missing,
+  // fetches it fresh from jsdelivr and then two mirror CDNs in turn before giving up — so a one-off
+  // network blip only costs one retry instead of breaking that format for the whole session.
+  function loadScriptWithFallback(urls, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      let i = 0;
+      function tryNext() {
+        if (i >= urls.length) { reject(new Error('Could not fetch ' + urls[urls.length - 1] + ' from any source.')); return; }
+        const url = urls[i++];
+        const s = document.createElement('script');
+        s.src = url;
+        let settled = false;
+        const timer = setTimeout(() => { if (!settled) { settled = true; s.remove(); tryNext(); } }, timeoutMs);
+        s.onload = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } };
+        s.onerror = () => { if (!settled) { settled = true; clearTimeout(timer); s.remove(); tryNext(); } };
+        document.head.appendChild(s);
+      }
+      tryNext();
+    });
+  }
+  function ensureLoaded(present, mirrors, whatFailedMsg) {
+    if (present()) return Promise.resolve();
+    return loadScriptWithFallback(mirrors, 9000).then(() => {
+      if (!present()) throw new Error(whatFailedMsg);
+    });
+  }
+  function ensureModelLoaderReady(ext) {
+    if (ext === 'glb' || ext === 'gltf') {
+      return ensureLoaded(() => !!THREE.GLTFLoader, [
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+        'https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js',
+      ], 'GLB/GLTF support could not be loaded from any source — check your connection and try again.');
+    }
+    if (ext === 'obj') {
+      return ensureLoaded(() => !!THREE.OBJLoader, [
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+        'https://unpkg.com/three@0.128.0/examples/js/loaders/OBJLoader.js',
+        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js',
+      ], 'OBJ support could not be loaded from any source — check your connection and try again.');
+    }
+    // FBX needs fflate loaded first — it's what FBXLoader uses to inflate compressed binary FBX data.
+    return ensureLoaded(() => !!window.fflate, [
+      'https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js',
+      'https://unpkg.com/fflate@0.6.9/umd/index.js',
+    ], 'A required FBX helper (fflate) could not be loaded from any source — check your connection and try again.')
+      .then(() => ensureLoaded(() => !!THREE.FBXLoader, [
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js',
+        'https://unpkg.com/three@0.128.0/examples/js/loaders/FBXLoader.js',
+        'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/FBXLoader.js',
+      ], 'FBX support could not be loaded from any source — check your connection and try again.'));
+  }
+
   // Central model parser: dispatches to the right THREE.js loader by file extension.
   // buffer: ArrayBuffer (as read by FileReader.readAsArrayBuffer). Handles glb/gltf (binary/JSON),
   // fbx (binary/ASCII), and obj (plain text — decoded from the ArrayBuffer here).
@@ -6062,25 +6127,28 @@
     startFakeProgress(startPct, 92, Math.min(6000, Math.max(500, sizeMB * 150)));
     const finish = (obj) => { stopFakeProgress(); setLoadingProgress(100); onDone(obj); };
     const fail = (err) => { stopFakeProgress(); onError(err); };
-    try {
-      if (ext === 'glb' || ext === 'gltf') {
-        new THREE.GLTFLoader(manager).parse(buffer, '', (gltf) => {
-          const obj = gltf.scene || gltf.scenes[0];
-          if (gltf.animations && gltf.animations.length) obj.animations = gltf.animations;
+    ensureModelLoaderReady(ext).then(() => {
+      try {
+        if (ext === 'glb' || ext === 'gltf') {
+          new THREE.GLTFLoader(manager).parse(buffer, '', (gltf) => {
+            const obj = gltf.scene || gltf.scenes[0];
+            if (gltf.animations && gltf.animations.length) obj.animations = gltf.animations;
+            finish(obj);
+          }, fail);
+        } else if (ext === 'obj') {
+          const text = new TextDecoder('utf-8').decode(buffer);
+          const obj = new THREE.OBJLoader(manager).parse(text);
           finish(obj);
-        }, fail);
-      } else if (ext === 'obj') {
-        const text = new TextDecoder('utf-8').decode(buffer);
-        const obj = new THREE.OBJLoader(manager).parse(text);
-        finish(obj);
-      } else {
-        const obj = new THREE.FBXLoader(manager).parse(buffer, '');
-        finish(obj);
+        } else {
+          const obj = new THREE.FBXLoader(manager).parse(buffer, '');
+          finish(obj);
+        }
+      } catch (err) {
+        fail(err);
       }
-    } catch (err) {
-      fail(err);
-    }
+    }, fail);
   }
+
 
   function loadFBXFile(file, allFiles) {
     showLoading('Reading ' + file.name + '…');
