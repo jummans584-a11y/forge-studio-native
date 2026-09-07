@@ -645,16 +645,20 @@
 
   #loading {
     position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    background: var(--overlay-strong); backdrop-filter: blur(2px); z-index: 20; flex-direction: column; gap: 10px; padding: 24px; text-align: center;
+    background: var(--overlay-strong);
+    backdrop-filter: blur(2px); z-index: 20; flex-direction: column; gap: 10px; padding: 24px; text-align: center;
   }
   #loading.show { display: flex; }
-  .spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-right-color: var(--accent-2); border-radius: 50%; animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #loading-title { font-size: 15px; font-weight: 700; letter-spacing: 1.5px; color: var(--ink); margin: 0; }
   #loading p { font-size: 12.5px; color: var(--ink-dim); max-width: 320px; }
   #loading pre { font-size: 10.5px; color: var(--danger); background: var(--panel-2); padding: 8px; border-radius: var(--r-sm); max-width: 320px; overflow: auto; text-align: left; white-space: pre-wrap; }
   #loading button.btn { margin-top: 6px; }
-  #loading-bar-track { width: 200px; height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; display: none; }
-  #loading-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 2px; transition: width 0.15s ease; }
+  #loading-progress-wrap { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  #loading-bar-track { width: 220px; height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+  #loading-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 4px; transition: width 0.15s ease; }
+  #loading-pct { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-dim); min-width: 34px; text-align: right; }
+
 
   #exposure-panel {
     position: absolute; top: 54px; right: 12px; z-index: 11;
@@ -1787,9 +1791,12 @@
   <div id="statsbar"></div>
 
   <div id="loading">
-    <div class="spinner" id="loading-spinner"></div>
+    <p id="loading-title">FORGE STUDIO</p>
     <p id="loading-text">Loading model…</p>
-    <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
+    <div id="loading-progress-wrap">
+      <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
+      <span id="loading-pct">0%</span>
+    </div>
     <pre id="loading-error" style="display:none;"></pre>
     <button class="btn" id="loading-dismiss" style="display:none;">OK</button>
   </div>
@@ -1926,7 +1933,7 @@
   const blockPreviewBar = document.getElementById('block-preview-bar');
   const blockPreviewHint = document.getElementById('block-preview-hint');
   const loadingEl = document.getElementById('loading');
-  const loadingSpinner = document.getElementById('loading-spinner');
+  const loadingPct = document.getElementById('loading-pct');
   const loadingText = document.getElementById('loading-text');
   const loadingError = document.getElementById('loading-error');
   const loadingDismiss = document.getElementById('loading-dismiss');
@@ -2372,26 +2379,46 @@
     maybeShowLoadingInterstitial();
     loadingText.textContent = text;
     loadingText.style.display = 'block';
-    loadingSpinner.style.display = 'block';
     loadingError.style.display = 'none';
     loadingDismiss.style.display = 'none';
-    loadingBarTrack.style.display = 'none';
     loadingBarFill.style.width = '0%';
+    loadingPct.textContent = '0%';
     loadingEl.classList.add('show');
   }
   function setLoadingProgress(pct) {
-    loadingBarTrack.style.display = 'block';
-    loadingBarFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    const clamped = Math.max(0, Math.min(100, pct));
+    loadingBarFill.style.width = clamped + '%';
+    loadingPct.textContent = Math.round(clamped) + '%';
+  }
+  // Real byte-level progress only exists for the file-read step (FileReader.onprogress). The
+  // parse step after it (FBXLoader/OBJLoader/GLTFLoader.parse) is one synchronous call with no
+  // progress events of its own — previously that phase just sat behind a spinner. Since a bar +
+  // number is now the only "something is happening" indicator, this ticks it smoothly toward
+  // (but never quite reaching) a target while the real work runs, so it keeps moving instead of
+  // freezing at whatever percentage the file-read step left it at; the caller still finishes with
+  // an explicit setLoadingProgress(100) once the real result is actually ready.
+  let _fakeProgressTimer = null;
+  function startFakeProgress(fromPct, towardPct, ms) {
+    stopFakeProgress();
+    const start = performance.now();
+    const span = Math.max(1, towardPct - fromPct);
+    _fakeProgressTimer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - start) / ms);
+      // ease-out — quick at first, crawls the last bit so it never visibly plateaus dead still
+      setLoadingProgress(fromPct + span * (1 - Math.pow(1 - t, 3)));
+    }, 80);
+  }
+  function stopFakeProgress() {
+    if (_fakeProgressTimer) { clearInterval(_fakeProgressTimer); _fakeProgressTimer = null; }
   }
   function showLoadError(text, detail) {
-    loadingSpinner.style.display = 'none';
-    loadingBarTrack.style.display = 'none';
+    stopFakeProgress();
     loadingText.textContent = text;
     loadingError.textContent = detail || '';
     loadingError.style.display = detail ? 'block' : 'none';
     loadingDismiss.style.display = 'inline-block';
   }
-  function hideLoading() { loadingEl.classList.remove('show'); }
+  function hideLoading() { stopFakeProgress(); loadingEl.classList.remove('show'); }
   loadingDismiss.onclick = hideLoading;
 
   function updateStats(root) {
@@ -5534,6 +5561,7 @@
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       const isGltf = ext === 'glb' || ext === 'gltf';
       loadingText.textContent = 'Adding animations… ' + (i + 1) + '/' + files.length + ' (' + file.name + ')';
+      setLoadingProgress((i / files.length) * 100);
       const reader = new FileReader();
       reader.onload = () => {
         const niceName = file.name.replace(/\.(fbx|glb|gltf)$/i, '');
@@ -6026,23 +6054,31 @@
   // buffer: ArrayBuffer (as read by FileReader.readAsArrayBuffer). Handles glb/gltf (binary/JSON),
   // fbx (binary/ASCII), and obj (plain text — decoded from the ArrayBuffer here).
   function parseModelBuffer(ext, buffer, manager, onDone, onError) {
+    // Keep the bar moving through the parse step too (see startFakeProgress above for why this is
+    // simulated rather than real) — scaled roughly by file size so a big file doesn't sit at 92%
+    // for way longer than the ramp allotted it, and a tiny one doesn't rush past instantly.
+    const startPct = parseFloat(loadingBarFill.style.width) || 0;
+    const sizeMB = (buffer && buffer.byteLength ? buffer.byteLength : 5e6) / 1e6;
+    startFakeProgress(startPct, 92, Math.min(6000, Math.max(500, sizeMB * 150)));
+    const finish = (obj) => { stopFakeProgress(); setLoadingProgress(100); onDone(obj); };
+    const fail = (err) => { stopFakeProgress(); onError(err); };
     try {
       if (ext === 'glb' || ext === 'gltf') {
         new THREE.GLTFLoader(manager).parse(buffer, '', (gltf) => {
           const obj = gltf.scene || gltf.scenes[0];
           if (gltf.animations && gltf.animations.length) obj.animations = gltf.animations;
-          onDone(obj);
-        }, (err) => onError(err));
+          finish(obj);
+        }, fail);
       } else if (ext === 'obj') {
         const text = new TextDecoder('utf-8').decode(buffer);
         const obj = new THREE.OBJLoader(manager).parse(text);
-        onDone(obj);
+        finish(obj);
       } else {
         const obj = new THREE.FBXLoader(manager).parse(buffer, '');
-        onDone(obj);
+        finish(obj);
       }
     } catch (err) {
-      onError(err);
+      fail(err);
     }
   }
 
@@ -15685,7 +15721,11 @@
     fileInputTerrainModel.value = '';
   };
   function pickModelFile(fileList) {
-    return Array.from(fileList).find(f => /\.(fbx|glb|gltf)$/i.test(f.name)) || fileList[0];
+    // BUGFIX: this only matched fbx/glb/gltf, so an .obj (which is often selected together with its
+    // companion .mtl and texture files) fell through to the `|| fileList[0]` fallback — fine if the
+    // .obj happened to be first in the selection, but if the .mtl or a texture sorted first instead,
+    // THAT got treated as "the model" and the actual .obj was silently ignored.
+    return Array.from(fileList).find(f => /\.(fbx|glb|gltf|obj)$/i.test(f.name)) || fileList[0];
   }
   fileInputReplace.onchange = (e) => {
     const files = e.target.files;
