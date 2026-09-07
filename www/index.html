@@ -1816,22 +1816,29 @@
   <div id="block-preview-hint">Rotate / pinch-zoom to inspect this shape</div>
   <div id="block-preview-bar"></div>
 
-  <input type="file" id="file-input-fbx" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
+  <!-- ANDROID FILE-PICKER FIX: accept="*/*" here (not extension-filtered) because Android's system
+       file picker (Storage Access Framework) has no registered MIME type for .fbx, so listing
+       ".fbx" in accept made the OS grey those files out as "unsupported" before the app ever saw
+       them — .glb/.gltf were mostly fine since Android does recognize those. Since the app already
+       validates the real extension in JS after a file is picked (parseModelBuffer / ext checks),
+       accepting everything here is safe and just moves the filtering from an unreliable OS-level
+       check to the app's own logic. -->
+  <input type="file" id="file-input-fbx" accept="*/*" multiple />
   <!-- PHASE 2 — Character B gets its own independent file picker so importing it can never touch
        Character A's <input>/its in-flight selection (sharing one <input> would mean whichever import
        was mid-pick last "owns" the element's onchange target). -->
-  <input type="file" id="file-input-fbx-b" accept=".fbx,.glb,.gltf,.obj" multiple />
+  <input type="file" id="file-input-fbx-b" accept="*/*" multiple />
   <input type="file" id="file-input-image" accept="image/*" />
-  <input type="file" id="file-input-anims" accept=".fbx,.glb,.gltf,.obj" multiple />
+  <input type="file" id="file-input-anims" accept="*/*" multiple />
   <input type="file" id="file-input-heightmap" accept="image/*" />
   <input type="file" id="file-input-groundtex" accept="image/*" />
   <input type="file" id="file-input-brushtex" accept="image/*" />
-  <input type="file" id="file-input-terrain-model" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
-  <input type="file" id="file-input-replace" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
-  <input type="file" id="file-input-place-on-cube" accept=".fbx,.glb,.gltf,.obj,image/*" multiple />
+  <input type="file" id="file-input-terrain-model" accept="*/*" multiple />
+  <input type="file" id="file-input-replace" accept="*/*" multiple />
+  <input type="file" id="file-input-place-on-cube" accept="*/*" multiple />
   <input type="file" id="file-input-project" accept=".json,application/json" />
-  <input type="file" id="file-input-library-add" accept=".fbx,.glb,.gltf,.obj" multiple />
-  <input type="file" id="file-input-outfit" accept=".fbx,.glb,.gltf" multiple />
+  <input type="file" id="file-input-library-add" accept="*/*" multiple />
+  <input type="file" id="file-input-outfit" accept="*/*" multiple />
 </div>
 
 <!-- Vendor libs bootstrap. Previously these were static <script src> tags with zero fallback and
