@@ -1860,7 +1860,6 @@
 
   loadingEl.classList.add('show');
   titleEl.textContent = 'FORGE STUDIO';
-  textEl.textContent = 'Downloading 3D engine…';
   errEl.style.display = 'none';
   dismissBtn.style.display = 'none';
   barFill.style.width = '0%';
@@ -1938,10 +1937,32 @@
     pctEl.textContent = Math.round(pct) + '%';
   }
 
+  // PERSISTENT CACHE — these files are pinned to an exact version (three@0.128.0 etc.), so their
+  // content never changes for a given URL. First run downloads them and saves the source into
+  // localStorage under the URL itself as the key; every run after that reads straight from
+  // localStorage and skips the network entirely — this is what makes it a true one-time download
+  // instead of a multi-second screen on every single app open. Browser/WebView HTTP cache alone
+  // isn't reliable enough for this on Android — it can get cleared independently of app data — so
+  // this is a second, explicit cache on top of it.
+  const CACHE_PREFIX = 'forgeVendorCacheV1:';
+  function readCache(url) {
+    try { return localStorage.getItem(CACHE_PREFIX + url); } catch (e) { return null; }
+  }
+  function writeCache(url, code) {
+    try { localStorage.setItem(CACHE_PREFIX + url, code); } catch (e) { /* storage full/unavailable — fine, just re-downloads next time */ }
+  }
+  function runCode(code) {
+    const s = document.createElement('script');
+    s.textContent = code;
+    document.head.appendChild(s);
+  }
+
   // Streams one URL with real byte progress when the server sends Content-Length (every CDN here
   // does); falls back to jumping 0→1 on completion otherwise. Executes the fetched code via a real
   // <script> tag (not eval) so normal script semantics and stack traces are preserved.
   function fetchAndRun(url, onProgress) {
+    const cached = readCache(url);
+    if (cached) { onProgress(1); runCode(cached); return Promise.resolve(); }
     return fetch(url).then((res) => {
       if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
       const total = parseInt(res.headers.get('content-length') || '0', 10);
@@ -1960,9 +1981,8 @@
       }
       return pump().then(() => new Blob(chunks).text());
     }).then((code) => {
-      const s = document.createElement('script');
-      s.textContent = code;
-      document.head.appendChild(s);
+      writeCache(url, code);
+      runCode(code);
     });
   }
 
@@ -1990,6 +2010,12 @@
     dismissBtn.onclick = () => location.reload();
   }
 
+  // If every file is already cached from a previous run this is just a fast local read, not a
+  // real download — label it accordingly so it doesn't read as the app being slow every time it
+  // opens. "Installing" only shows on the actual first run (or after app storage is cleared).
+  const allCachedUpfront = FILES.every((f) => f.mirrors.some((u) => !!readCache(u)));
+  textEl.textContent = allCachedUpfront ? 'Loading…' : 'Installing (first launch only)…';
+
   // three.js core has to finish first — every other file attaches onto the THREE namespace and
   // will throw if it isn't defined yet. Everything after core downloads in parallel.
   loadFileWithMirrors(FILES[0], 0)
@@ -1997,11 +2023,17 @@
     .then(() => {
       barFill.style.width = '100%';
       pctEl.textContent = '100%';
-      textEl.textContent = 'Starting…';
       if (typeof window.__initForgeStudioApp !== 'function') {
         throw new Error('Main app script did not load.');
       }
       window.__initForgeStudioApp();
+      // BUG FIX: the app's own showLoading()/hideLoading() only ever toggle this same overlay
+      // during actual model imports/saves — they were never written to expect this overlay to
+      // already be open at boot. Without this line the overlay this bootstrap opened above just
+      // stayed on screen forever after startup finished (stuck at 100%, nothing left to hide it),
+      // which is exactly the "yeh 100% pe atak gaya" symptom. From here on the overlay goes back to
+      // its normal behavior: hidden until a real load/save operation opens it.
+      loadingEl.classList.remove('show');
     })
     .catch((err) => {
       console.error(err);
