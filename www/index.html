@@ -1834,23 +1834,186 @@
   <input type="file" id="file-input-outfit" accept=".fbx,.glb,.gltf" multiple />
 </div>
 
-<!-- Vendor libs: loaded from jsDelivr CDN, pinned to three.js r128 to match this app's code.
-     If you'd rather ship these as local files (fully offline vendor/ folder), download each URL
-     below and save it under ./vendor/ with the same filename, then switch these src= back to
-     ./vendor/<file>.js — no other code changes needed. -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/modifiers/SimplifyModifier.js"></script>
+<!-- Vendor libs bootstrap. Previously these were static <script src> tags with zero fallback and
+     zero visible feedback — if any single one dropped (flaky mobile data, a CDN edge having an off
+     moment, WebView caching a broken response) THREE stayed undefined and the whole app died
+     silently behind the loading screen with no explanation and no retry. This bootstrap instead:
+       1) starts downloading everything the instant the app opens (no waiting on user action),
+       2) shows real byte-level progress on the existing loading overlay so it's visible how much
+          has (or hasn't) come down,
+       3) falls back through mirror CDNs (jsdelivr → unpkg → cdnjs → jsdelivr-gh) per file if the
+          primary source fails, so one bad request doesn't take down engine startup or any one
+          import format (FBX/GLTF/OBJ) for the whole session,
+       4) only hands off to the main app (__initForgeStudioApp, defined below) once the 3D engine
+          core has actually loaded successfully.
+     The per-format lazy loader further down (ensureModelLoaderReady) still exists as a second
+     safety net for mid-session re-fetches; this bootstrap is what covers the initial app-open case. -->
 <script>
 (function () {
+  const loadingEl = document.getElementById('loading');
+  const titleEl = document.getElementById('loading-title');
+  const textEl = document.getElementById('loading-text');
+  const barFill = document.getElementById('loading-bar-fill');
+  const pctEl = document.getElementById('loading-pct');
+  const errEl = document.getElementById('loading-error');
+  const dismissBtn = document.getElementById('loading-dismiss');
+
+  loadingEl.classList.add('show');
+  titleEl.textContent = 'FORGE STUDIO';
+  textEl.textContent = 'Downloading 3D engine…';
+  errEl.style.display = 'none';
+  dismissBtn.style.display = 'none';
+  barFill.style.width = '0%';
+  pctEl.textContent = '0%';
+
+  // weight ~= rough file size in KB, only used to make the aggregate bar move proportionally
+  // (a 620KB engine file shouldn't visually finish as fast as a 6KB modifier).
+  const FILES = [
+    { name: 'three.js core', weight: 620, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js',
+      'https://unpkg.com/three@0.128.0/build/three.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.128.0/three.min.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/build/three.min.js',
+    ] },
+    { name: 'OrbitControls', weight: 12, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js',
+      'https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/controls/OrbitControls.js',
+    ] },
+    { name: 'TransformControls', weight: 20, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js',
+      'https://unpkg.com/three@0.128.0/examples/js/controls/TransformControls.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/controls/TransformControls.js',
+    ] },
+    { name: 'fflate', weight: 30, mirrors: [
+      'https://cdn.jsdelivr.net/npm/fflate@0.6.9/umd/index.js',
+      'https://unpkg.com/fflate@0.6.9/umd/index.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/fflate/0.6.9/umd/index.js',
+    ] },
+    { name: 'FBXLoader', weight: 25, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js',
+      'https://unpkg.com/three@0.128.0/examples/js/loaders/FBXLoader.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/FBXLoader.js',
+    ] },
+    { name: 'GLTFLoader', weight: 45, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+      'https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/GLTFLoader.js',
+    ] },
+    { name: 'OBJLoader', weight: 12, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+      'https://unpkg.com/three@0.128.0/examples/js/loaders/OBJLoader.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/loaders/OBJLoader.js',
+    ] },
+    { name: 'GLTFExporter', weight: 20, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js',
+      'https://unpkg.com/three@0.128.0/examples/js/exporters/GLTFExporter.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/exporters/GLTFExporter.js',
+    ] },
+    { name: 'OBJExporter', weight: 6, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/OBJExporter.js',
+      'https://unpkg.com/three@0.128.0/examples/js/exporters/OBJExporter.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/exporters/OBJExporter.js',
+    ] },
+    { name: 'BufferGeometryUtils', weight: 10, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js',
+      'https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/utils/BufferGeometryUtils.js',
+    ] },
+    { name: 'SimplifyModifier', weight: 8, mirrors: [
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/modifiers/SimplifyModifier.js',
+      'https://unpkg.com/three@0.128.0/examples/js/modifiers/SimplifyModifier.js',
+      'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/modifiers/SimplifyModifier.js',
+    ] },
+  ];
+
+  const totalWeight = FILES.reduce((s, f) => s + f.weight, 0);
+  const progressFrac = new Array(FILES.length).fill(0); // 0..1 per file
+
+  function renderProgress() {
+    let done = 0;
+    for (let i = 0; i < FILES.length; i++) done += FILES[i].weight * progressFrac[i];
+    const pct = totalWeight ? Math.min(99, (done / totalWeight) * 100) : 0;
+    barFill.style.width = pct + '%';
+    pctEl.textContent = Math.round(pct) + '%';
+  }
+
+  // Streams one URL with real byte progress when the server sends Content-Length (every CDN here
+  // does); falls back to jumping 0→1 on completion otherwise. Executes the fetched code via a real
+  // <script> tag (not eval) so normal script semantics and stack traces are preserved.
+  function fetchAndRun(url, onProgress) {
+    return fetch(url).then((res) => {
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
+      const total = parseInt(res.headers.get('content-length') || '0', 10);
+      if (!res.body || !total) return res.text().then((text) => { onProgress(1); return text; });
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      function pump() {
+        return reader.read().then(({ done, value }) => {
+          if (done) return;
+          chunks.push(value);
+          received += value.length;
+          onProgress(Math.min(1, received / total));
+          return pump();
+        });
+      }
+      return pump().then(() => new Blob(chunks).text());
+    }).then((code) => {
+      const s = document.createElement('script');
+      s.textContent = code;
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadFileWithMirrors(file, index) {
+    let attempt = 0;
+    function tryMirror() {
+      if (attempt >= file.mirrors.length) return Promise.reject(new Error('All sources failed for ' + file.name));
+      const url = file.mirrors[attempt++];
+      return fetchAndRun(url, (frac) => { progressFrac[index] = frac; renderProgress(); })
+        .catch((err) => {
+          console.warn('Vendor lib source failed, trying next mirror for ' + file.name + ':', url, err);
+          progressFrac[index] = 0;
+          return tryMirror();
+        });
+    }
+    return tryMirror();
+  }
+
+  function showFatalError(text, detail) {
+    textEl.textContent = text;
+    errEl.textContent = detail || '';
+    errEl.style.display = 'block';
+    dismissBtn.style.display = 'inline-block';
+    dismissBtn.textContent = 'Retry';
+    dismissBtn.onclick = () => location.reload();
+  }
+
+  // three.js core has to finish first — every other file attaches onto the THREE namespace and
+  // will throw if it isn't defined yet. Everything after core downloads in parallel.
+  loadFileWithMirrors(FILES[0], 0)
+    .then(() => Promise.all(FILES.slice(1).map((f, i) => loadFileWithMirrors(f, i + 1))))
+    .then(() => {
+      barFill.style.width = '100%';
+      pctEl.textContent = '100%';
+      textEl.textContent = 'Starting…';
+      if (typeof window.__initForgeStudioApp !== 'function') {
+        throw new Error('Main app script did not load.');
+      }
+      window.__initForgeStudioApp();
+    })
+    .catch((err) => {
+      console.error(err);
+      showFatalError(
+        'Could not download the 3D engine — check your connection and try again.',
+        (err && (err.message || String(err))) || String(err)
+      );
+    });
+})();
+</script>
+<script>
+window.__initForgeStudioApp = function () {
   const canvas = document.getElementById('three');
   const emptyState = document.getElementById('empty-state');
   const emptyGlyph = document.getElementById('empty-glyph');
@@ -15892,7 +16055,7 @@
       onboardingOverlay.classList.add('show'); // no localStorage (private mode, etc.) — still show once per load
     }
   }
-})();
+};
 </script>
 <script>
   // Registers the service worker so the app becomes installable (Chrome will offer "Add to Home
