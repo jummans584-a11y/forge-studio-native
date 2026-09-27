@@ -324,10 +324,10 @@
     height: 38vh; /* JS overrides this per drag/snap state once initialized */
     max-height: 92vh;
     touch-action: none;
-    overflow: hidden; /* BUGFIX: hard clip — nothing (mode-bar, dock content) can ever visually
-      spill past the panel's own bounds and over the 3D viewport, no matter what width/overflow
-      miscalculation happens inside. Inner scroll areas (#dock, .seg) keep their own overflow
-      auto/scroll so this doesn't block normal scrolling. */
+    overflow: hidden; /* Hard clip — nothing (mode-bar, dock content) can visually spill past the
+      panel's own bounds and over the 3D viewport, no matter what width/overflow miscalculation
+      happens inside. Inner scroll areas (#dock, .seg) keep their own overflow auto/scroll so this
+      doesn't block normal scrolling. */
   }
   #dock-sheet.show { display: flex; }
   #dock-sheet.dragging { transition: none !important; }
@@ -382,15 +382,9 @@
     display: none;
   }
 
-  /* BUGFIX: the actual touch target here was only ~14px tall (6px+4px+4px padding+bar) — far below
-     the ~44px minimum a finger can reliably hit. That made grabbing the handle unreliable on a real
-     phone even though the drag logic itself (setupDockDrag, further down) was always correct: most
-     touches were simply landing just above/below the strip and missing it entirely, hitting either
-     the empty top of the sheet (no listener) or the scrollable #dock content instead (which only
-     scrolls, doesn't resize the sheet). min-height + justify-content:center gives the same thin
-     visual bar a properly sized, centered tap zone around it without changing how it looks. This is
-     unrelated to the earlier slider touch-action fix — different element, never touched by that.
-  */
+  /* min-height + justify-content:center give the thin visual handle bar a properly sized (~44px),
+     centered tap zone around it, without changing how it looks — a finger can't reliably hit a
+     target much smaller than that, so the bar itself is not the actual touch target. */
   #dock-handle-area {
     flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     min-height: 34px;
@@ -431,15 +425,13 @@
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
-  /* BUGFIX: #dock only allows vertical-pan gestures (so the panel itself can be scrolled). Range
-     sliders live inside it (brush size for vegetation/mountain/terrain, material sliders, UV
-     sliders, etc.) and need to respond to pure horizontal drags. Under touch-action:pan-y the
-     browser withholds gesture recognition on a horizontal-only drag until some vertical motion
-     shows up (matching "works only if I nudge up/down first" reports), because it's still trying
-     to decide whether the touch is meant to scroll the panel. Giving every slider its own
-     touch-action:none opts it out of that scroll-gesture arbitration entirely, so its thumb starts
-     tracking the very first touch-move regardless of direction — same fix already used for the 3D
-     canvas above, just scoped to the sliders instead of blocking dock scrolling entirely. */
+  /* #dock only allows vertical-pan gestures (so the panel itself can be scrolled). Range sliders
+     live inside it (brush size for vegetation/mountain/terrain, material sliders, UV sliders, etc.)
+     and need to respond to pure horizontal drags. Under touch-action:pan-y the browser withholds
+     gesture recognition on a horizontal-only drag until some vertical motion shows up, because it's
+     still deciding whether the touch is meant to scroll the panel. Giving every slider its own
+     touch-action:none opts it out of that arbitration, so its thumb tracks the first touch-move
+     regardless of direction — same approach as the 3D canvas above, scoped to just the sliders. */
   #dock input[type="range"] {
     touch-action: none;
   }
@@ -880,16 +872,65 @@
   }
   #onboardingBox h2 { font-size: 16px; margin: 0 0 2px; font-weight: 600; }
   #onboardingBox > .sub { font-size: 12px; color: var(--ink-dim); margin-bottom: 10px; line-height: 1.5; }
-  #onboardingSteps { overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1; min-height: 0; margin-bottom: 12px; }
-  .onboard-step { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
-  .onboard-step:last-child { border-bottom: none; }
-  .onboard-step .onboard-icon { font-size: 18px; flex-shrink: 0; width: 24px; text-align: center; }
-  .onboard-step .onboard-text b { display: block; font-size: 12.5px; margin-bottom: 2px; }
-  .onboard-step .onboard-text span { display: block; font-size: 11.5px; color: var(--ink-dim); line-height: 1.45; }
-  #onboardingFoot { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  #onboardingDontShow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); flex: 1; }
+  #onboardingSteps { position: relative; overflow: hidden; min-height: 168px; }
+  .onboard-step {
+    display: none; flex-direction: column; align-items: center; text-align: center;
+    padding: 6px 6px 4px; animation: onbFadeIn 0.22s ease;
+  }
+  @keyframes onbFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .onboard-step.active { display: flex; }
+  .onboard-icon-big {
+    width: 56px; height: 56px; border-radius: 50%; margin-bottom: 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-grad-soft); color: var(--accent);
+  }
+  .onboard-icon-big svg { width: 28px; height: 28px; }
+  .onboard-step h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  .onboard-step p { font-size: 12.5px; color: var(--ink-dim); line-height: 1.55; margin: 0; max-width: 280px; }
+  #onboardingDots { display: flex; justify-content: center; gap: 6px; margin: 14px 0 14px; }
+  #onboardingDots .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); transition: background 0.15s ease, transform 0.15s ease; }
+  #onboardingDots .dot.active { background: var(--accent); transform: scale(1.3); }
+  #onboardingFoot { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+  #onboardingDontShow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); flex: 1 1 100%; order: 3; margin-top: 4px; }
   #onboardingDontShow input { width: 15px; height: 15px; }
-  #onboardingGotIt { flex-shrink: 0; }
+  #onboardingBack { flex-shrink: 0; }
+  #onboardingBack[hidden] { display: none; }
+  #onboardingNext { flex: 1; }
+
+  /* ---------- Generic confirm/prompt modal (customModal()) ---------- */
+  #customModalOverlay {
+    position: absolute; inset: 0; z-index: 80; display: none;
+    background: rgba(0,0,0,0.72); backdrop-filter: blur(2px);
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  #customModalOverlay.show { display: flex; animation: cmFadeIn 0.15s ease; }
+  @keyframes cmFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  #customModalBox {
+    width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--r-lg); padding: 20px 18px 16px; text-align: center;
+    box-shadow: var(--shadow-md); animation: cmPopIn 0.18s cubic-bezier(.2,.9,.3,1.2);
+  }
+  @keyframes cmPopIn { from { opacity: 0; transform: scale(0.92) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+  #customModalIconWrap {
+    width: 44px; height: 44px; border-radius: 50%; margin: 0 auto 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-grad-soft); color: var(--accent);
+  }
+  #customModalIconWrap svg { width: 22px; height: 22px; stroke: currentColor; }
+  #customModalOverlay.danger #customModalIconWrap { background: rgba(255,107,107,0.14); color: var(--danger); }
+  #customModalBox b#customModalTitle { font-size: 15px; display: block; margin-bottom: 6px; font-weight: 600; }
+  #customModalMsg { font-size: 12.5px; color: var(--ink-dim); line-height: 1.55; margin: 0 0 14px; white-space: pre-line; }
+  #customModalInput {
+    display: none; width: 100%; padding: 10px 12px; margin-bottom: 14px; border-radius: var(--r-md);
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-size: 13px;
+    text-align: left; transition: border-color 0.15s ease;
+  }
+  #customModalInput:focus { border-color: var(--accent); }
+  #customModalOverlay.has-input #customModalInput { display: block; }
+  #customModalActions { display: flex; gap: 8px; }
+  #customModalActions button { flex: 1; padding: 11px 10px; font-size: 13px; }
+  #customModalOverlay.alert-only #customModalCancel { display: none; }
+  #customModalOverlay.danger #customModalOk { color: var(--danger); border-color: rgba(255,107,107,0.4); background: rgba(255,107,107,0.08); }
 
   #projectsModal {
     position: absolute; inset: 0; z-index: 46; display: none;
@@ -1009,10 +1050,6 @@
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: var(--r-pill); }
   ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
-  #topbar {
-    background: linear-gradient(to bottom, rgba(14,15,18,0.96), rgba(14,15,18,0));
-    backdrop-filter: blur(10px);
-  }
   .title { font-family: var(--font-display); font-weight: 600; }
 
   #workspace-tabs { background: linear-gradient(180deg, var(--panel-3), var(--panel-2)); box-shadow: var(--shadow-xs), inset 0 1px 0 var(--line-hi); }
@@ -1057,11 +1094,6 @@
   }
   .field .flabel .fval { text-shadow: 0 0 10px var(--accent-glow); }
 
-  #dock-sheet {
-    background: linear-gradient(180deg, var(--panel), #131419);
-    box-shadow: var(--shadow-lg), inset 0 1px 0 var(--line-hi);
-    backdrop-filter: blur(16px);
-  }
   #dock-sheet.landscape { box-shadow: 8px 0 28px rgba(0,0,0,0.45), inset 0 1px 0 var(--line-hi); }
   #dock-handle-bar { background: linear-gradient(90deg, var(--ink-faint), var(--line)); }
   #dock-handle-area:active #dock-handle-bar { background: var(--accent-grad); box-shadow: 0 0 8px var(--accent-glow); }
@@ -1243,16 +1275,13 @@
     border-color: var(--glass-edge-bright) !important;
   }
 
-  /* FLICKER FIX: everything below (.iconbtn, .btn, .seg, sliders, dock
-     cards, toolbar chips…) lives INSIDE #dock, which scrolls (overflow-y:
-     auto). Giving each of these its own backdrop-filter meant every one
-     of them had to re-sample and re-blur what's behind it on every
-     scroll frame — that's what caused the blink/flash while dragging the
-     panel up/down on Android's WebView. Fix: no backdrop-filter at all
-     on anything inside the scroll area — just a flat translucent fill
-     (still reads as glass since it sits on the already-blurred sheet
-     behind it), so scrolling repaints instantly with nothing to
-     recompute. Blur stays only on the outer static bars above. */
+  /* Everything below (.iconbtn, .btn, .seg, sliders, dock cards, toolbar chips…) lives INSIDE
+     #dock, which scrolls (overflow-y: auto). Giving each of these its own backdrop-filter would
+     mean every one of them re-samples and re-blurs what's behind it on every scroll frame, causing
+     visible blink/flash while dragging the panel on Android's WebView. So: no backdrop-filter at
+     all on anything inside the scroll area — just a flat translucent fill (still reads as glass
+     since it sits on the already-blurred sheet behind it), so scrolling repaints instantly with
+     nothing to recompute. Blur stays only on the outer static bars above. */
   .iconbtn,
   .btn,
   .seg,
@@ -1369,14 +1398,13 @@
   }
 
   /* ------------------------------------------------------------
-     LATE OVERRIDES: a second "premium gloss" pass elsewhere in this
-     stylesheet re-declares solid/near-opaque backgrounds for several of
-     the same elements (topbar, dock-sheet, buttons/chips) *after* the
-     glass rules above, so those solid backgrounds were winning the
-     cascade and quietly undoing the glass look on those elements. This
-     block is placed at the very end of <style> on purpose so it always
-     has the final say, restoring true glass everywhere black/opaque
-     panels were showing through.
+     LATE OVERRIDES. The dead-weight duplicate solid-background rules that
+     used to fight the glass look on #topbar/#dock-sheet (an earlier
+     "premium gloss" pass re-declaring opaque fills for the same elements)
+     have been removed at the source instead of patched here. What remains
+     below still needs the final say: buttons/chips, the full-screen modal
+     scrims, and the workspace-tabs sizing, all placed last on purpose so
+     they always win the cascade.
   ------------------------------------------------------------ */
   #topbar {
     background: linear-gradient(to bottom, var(--glass-topbar), rgba(20,21,25,0)) !important;
@@ -1503,22 +1531,29 @@
 
 
 </style>
+<!-- Single source of truth for accent color presets — read by BOTH the pre-paint script right
+     below (which must run standalone, before the rest of the app's JS exists, to avoid a flash of
+     the wrong accent on load) and applyAccent() in the main script later in this file. Previously
+     this object was hand-duplicated in both places and kept "in sync manually"; now there is
+     exactly one copy, so a preset can never drift between the two. -->
+<script type="application/json" id="accentPresetsData">
+{
+  "orange": { "label": "Orange", "a": "#ff8a4c", "a2": "#ffc98a", "a3": "#e2632a", "dim": "#5a3a2b", "glow": "rgba(255,138,76,0.35)", "grad": "linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%)", "gradsoft": "linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08))" },
+  "blue": { "label": "Blue", "a": "#4c9aff", "a2": "#8ac2ff", "a3": "#2a63e2", "dim": "#2b3a5a", "glow": "rgba(76,154,255,0.35)", "grad": "linear-gradient(135deg, #6cb2ff 0%, #3d84ff 55%, #2a63e2 100%)", "gradsoft": "linear-gradient(135deg, rgba(102,166,255,0.16), rgba(42,99,226,0.08))" },
+  "green": { "label": "Green", "a": "#52d18a", "a2": "#96e8bb", "a3": "#2a9e5c", "dim": "#254a35", "glow": "rgba(82,209,138,0.35)", "grad": "linear-gradient(135deg, #78e0a6 0%, #45c67f 55%, #2a9e5c 100%)", "gradsoft": "linear-gradient(135deg, rgba(102,224,166,0.16), rgba(42,158,92,0.08))" },
+  "purple": { "label": "Purple", "a": "#b083ff", "a2": "#d6bbff", "a3": "#7c3fe2", "dim": "#3a2b5a", "glow": "rgba(176,131,255,0.35)", "grad": "linear-gradient(135deg, #c8a4ff 0%, #a56aff 55%, #7c3fe2 100%)", "gradsoft": "linear-gradient(135deg, rgba(198,164,255,0.16), rgba(124,63,226,0.08))" },
+  "red": { "label": "Red", "a": "#ff6363", "a2": "#ffa3a3", "a3": "#d92c2c", "dim": "#5a2b2b", "glow": "rgba(255,99,99,0.35)", "grad": "linear-gradient(135deg, #ff8a8a 0%, #ff5252 55%, #d92c2c 100%)", "gradsoft": "linear-gradient(135deg, rgba(255,138,138,0.16), rgba(217,44,44,0.08))" },
+  "teal": { "label": "Teal", "a": "#3ed6c4", "a2": "#8aeee2", "a3": "#1f9e8f", "dim": "#254a46", "glow": "rgba(62,214,196,0.35)", "grad": "linear-gradient(135deg, #6ee6d8 0%, #33c4b1 55%, #1f9e8f 100%)", "gradsoft": "linear-gradient(135deg, rgba(110,230,216,0.16), rgba(31,158,143,0.08))" }
+}
+</script>
 <script>
   // Applies the saved theme mode + accent color to <html> before the body paints, so there's no
   // flash of the default dark/orange look on load for someone who picked light mode / a different
-  // accent in Settings. ACCENT_PRESETS is intentionally duplicated (also defined in the main
-  // script below) since this tiny pre-paint pass has to run standalone, before the rest of the
-  // app's code has loaded.
+  // accent in Settings. Reads ACCENT_PRESETS from the JSON blob above (see its comment) since this
+  // tiny pre-paint pass has to run standalone, before the rest of the app's code has loaded.
   (function () {
     try {
-      var ACCENT_PRESETS = {
-        orange: { a: '#ff8a4c', a2: '#ffc98a', a3: '#e2632a', dim: '#5a3a2b', glow: 'rgba(255,138,76,0.35)', grad: 'linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08))' },
-        blue: { a: '#4c9aff', a2: '#8ac2ff', a3: '#2a63e2', dim: '#2b3a5a', glow: 'rgba(76,154,255,0.35)', grad: 'linear-gradient(135deg, #6cb2ff 0%, #3d84ff 55%, #2a63e2 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,166,255,0.16), rgba(42,99,226,0.08))' },
-        green: { a: '#52d18a', a2: '#96e8bb', a3: '#2a9e5c', dim: '#254a35', glow: 'rgba(82,209,138,0.35)', grad: 'linear-gradient(135deg, #78e0a6 0%, #45c67f 55%, #2a9e5c 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,224,166,0.16), rgba(42,158,92,0.08))' },
-        purple: { a: '#b083ff', a2: '#d6bbff', a3: '#7c3fe2', dim: '#3a2b5a', glow: 'rgba(176,131,255,0.35)', grad: 'linear-gradient(135deg, #c8a4ff 0%, #a56aff 55%, #7c3fe2 100%)', gradsoft: 'linear-gradient(135deg, rgba(198,164,255,0.16), rgba(124,63,226,0.08))' },
-        red: { a: '#ff6363', a2: '#ffa3a3', a3: '#d92c2c', dim: '#5a2b2b', glow: 'rgba(255,99,99,0.35)', grad: 'linear-gradient(135deg, #ff8a8a 0%, #ff5252 55%, #d92c2c 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,138,138,0.16), rgba(217,44,44,0.08))' },
-        teal: { a: '#3ed6c4', a2: '#8aeee2', a3: '#1f9e8f', dim: '#254a46', glow: 'rgba(62,214,196,0.35)', grad: 'linear-gradient(135deg, #6ee6d8 0%, #33c4b1 55%, #1f9e8f 100%)', gradsoft: 'linear-gradient(135deg, rgba(110,230,216,0.16), rgba(31,158,143,0.08))' }
-      };
+      var ACCENT_PRESETS = JSON.parse(document.getElementById('accentPresetsData').textContent);
       var mode = localStorage.getItem('themeMode') || 'light';
       var accentName = localStorage.getItem('themeAccent') || 'orange';
       if (mode === 'light') document.documentElement.setAttribute('data-theme', 'light');
@@ -1743,18 +1778,28 @@
 
   <div id="onboardingOverlay">
     <div id="onboardingBox">
-      <h2>👋 Welcome to Forge Studio</h2>
-      <div class="sub">A quick tour before you dive in — this only shows once.</div>
       <div id="onboardingSteps">
-        <div class="onboard-step"><span class="onboard-icon">🧍⛰</span><span class="onboard-text"><b>Two workspaces</b><span>Switch between Character (paint/sculpt a model) and Map/Terrain (build a scene) up top.</span></span></div>
-        <div class="onboard-step"><span class="onboard-icon">🧰</span><span class="onboard-text"><b>Tools live in the bottom panel</b><span>Drag the handle at the top of the panel up or down to resize it. Tabs inside switch between Sculpt, Object, Paint, Vegetation, Export and more.</span></span></div>
-        <div class="onboard-step"><span class="onboard-icon">📚</span><span class="onboard-text"><b>Asset Library</b><span>Save models you import so you can reuse and scatter them later without re-importing.</span></span></div>
-        <div class="onboard-step"><span class="onboard-icon">↶</span><span class="onboard-text"><b>Undo is always there</b><span>Works across every tool — sculpt, paint, objects, vegetation — so it's safe to experiment.</span></span></div>
-        <div class="onboard-step"><span class="onboard-icon">⚠️</span><span class="onboard-text"><b>Watch the poly count</b><span>Mobile has limited memory. If a warning about a "heavy scene" shows up, try Optimize → Merge before it slows down.</span></span></div>
+        <div class="onboard-step active">
+          <div class="onboard-icon-big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13M13 4l4 4-4 4"/><path d="M20 16H7M11 12l-4 4 4 4"/></svg></div>
+          <h2>Two workspaces</h2>
+          <p>Character to sculpt &amp; paint a model. Map to build a scene. Switch anytime up top.</p>
+        </div>
+        <div class="onboard-step">
+          <div class="onboard-icon-big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10" width="18" height="9" rx="1.5"/><path d="M8 10V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M3 14h18"/></svg></div>
+          <h2>Tools &amp; undo</h2>
+          <p>Drag the bottom panel's handle to resize it. Undo works across every tool, so it's safe to experiment.</p>
+        </div>
+        <div class="onboard-step">
+          <div class="onboard-icon-big"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><path d="M16.5 5 20 6l-2 14-3.5-.8"/></svg></div>
+          <h2>Library &amp; performance</h2>
+          <p>Save imported models to reuse later. If a scene gets heavy, try Optimize → Merge before it slows down.</p>
+        </div>
       </div>
+      <div id="onboardingDots"><span class="dot active"></span><span class="dot"></span><span class="dot"></span></div>
       <div id="onboardingFoot">
-        <label id="onboardingDontShow"><input type="checkbox" id="onboardingDontShowCheck" checked />Don't show again</label>
-        <button class="btn primary" id="onboardingGotIt">Got it</button>
+        <label id="onboardingDontShow"><input type="checkbox" id="onboardingDontShowCheck" />Don't show again</label>
+        <button class="btn" id="onboardingBack">Back</button>
+        <button class="btn primary" id="onboardingNext">Next</button>
       </div>
     </div>
   </div>
@@ -1803,6 +1848,22 @@
   <div id="toast"></div>
   <div id="undoToast"><span class="utxt"></span><span class="utcount"></span><button class="utbtn">Undo</button></div>
 
+  <!-- Generic confirm/prompt modal — replaces native confirm()/prompt()/alert(), which look and
+       feel cheap and are inconsistent across WebViews. Styled like assetVariantPrompt/
+       assetPartsPrompt (same glass card language), driven entirely by customModal() in JS. -->
+  <div id="customModalOverlay" role="dialog" aria-modal="true">
+    <div id="customModalBox">
+      <div id="customModalIconWrap"><span id="customModalIcon"></span></div>
+      <b id="customModalTitle"></b>
+      <p id="customModalMsg"></p>
+      <input id="customModalInput" type="text" autocomplete="off" />
+      <div id="customModalActions">
+        <button class="btn" id="customModalCancel">Cancel</button>
+        <button class="btn primary" id="customModalOk">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div id="dock-sheet">
     <div id="dock-handle-area">
       <div id="dock-handle-bar"></div>
@@ -1816,13 +1877,12 @@
   <div id="block-preview-hint">Rotate / pinch-zoom to inspect this shape</div>
   <div id="block-preview-bar"></div>
 
-  <!-- ANDROID FILE-PICKER FIX: accept="*/*" here (not extension-filtered) because Android's system
-       file picker (Storage Access Framework) has no registered MIME type for .fbx, so listing
-       ".fbx" in accept made the OS grey those files out as "unsupported" before the app ever saw
-       them — .glb/.gltf were mostly fine since Android does recognize those. Since the app already
-       validates the real extension in JS after a file is picked (parseModelBuffer / ext checks),
-       accepting everything here is safe and just moves the filtering from an unreliable OS-level
-       check to the app's own logic. -->
+  <!-- accept="*/*" here (not extension-filtered) because Android's system file picker (Storage
+       Access Framework) has no registered MIME type for .fbx, so listing ".fbx" in accept makes the
+       OS grey those files out as "unsupported" before the app ever sees them — .glb/.gltf are
+       mostly fine since Android does recognize those. The app validates the real extension in JS
+       after a file is picked (parseModelBuffer / ext checks), so accepting everything here is safe
+       and just moves the filtering from an unreliable OS-level check to the app's own logic. -->
   <input type="file" id="file-input-fbx" accept="*/*" multiple />
   <!-- PHASE 2 — Character B gets its own independent file picker so importing it can never touch
        Character A's <input>/its in-flight selection (sharing one <input> would mean whichever import
@@ -2034,12 +2094,10 @@
         throw new Error('Main app script did not load.');
       }
       window.__initForgeStudioApp();
-      // BUG FIX: the app's own showLoading()/hideLoading() only ever toggle this same overlay
-      // during actual model imports/saves — they were never written to expect this overlay to
-      // already be open at boot. Without this line the overlay this bootstrap opened above just
-      // stayed on screen forever after startup finished (stuck at 100%, nothing left to hide it),
-      // which is exactly the "yeh 100% pe atak gaya" symptom. From here on the overlay goes back to
-      // its normal behavior: hidden until a real load/save operation opens it.
+      // The app's own showLoading()/hideLoading() only ever toggle this same overlay during actual
+      // model imports/saves — they don't know this overlay was already open at boot, so nothing
+      // else will close it once startup finishes. Explicitly close it here and hand the overlay
+      // back to its normal behavior: hidden until a real load/save operation opens it.
       loadingEl.classList.remove('show');
     })
     .catch((err) => {
@@ -2153,13 +2211,11 @@ window.__initForgeStudioApp = function () {
   const fileInputProject = document.getElementById('file-input-project');
   const fileInputLibraryAdd = document.getElementById('file-input-library-add');
   const fileInputOutfit = document.getElementById('file-input-outfit');
-  // BUGFIX: uploading a model worked once, then subsequent taps on "Import FBX/GLB" (or any other
-  // upload button) silently did nothing — the file picker sheet either didn't reopen or reopened but
-  // its selection stopped firing 'change'. Cause: some Android WebViews (which is exactly what an
-  // APK build of this app runs in) don't reliably treat clearing input.value *after* a selection as
-  // "empty" for the *next* picker session. The fix that reliably works across WebView versions is to
-  // force the value empty right before each picker is opened as well (not only after), and every
-  // .click() trigger below now goes through this helper instead of calling input.click() directly.
+  // Some Android WebViews (which is exactly what an APK build of this app runs in) don't reliably
+  // treat clearing input.value *after* a selection as "empty" for the *next* picker session, which
+  // can leave a re-opened picker's selection silently not firing 'change'. Forcing the value empty
+  // right before opening as well (not only after) is reliable across WebView versions — every
+  // .click() trigger below goes through this helper instead of calling input.click() directly.
   function openFilePicker(input) {
     input.value = '';
     input.click();
@@ -2279,6 +2335,45 @@ window.__initForgeStudioApp = function () {
     '✨': svgIcon('<path d="M12 3l1.5 5L18 9l-4.5 1L12 15l-1.5-5L6 9l4.5-1z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
     '↕': svgIcon('<path d="M12 3v18"/><path d="M8 7l4-4 4 4M8 17l4 4 4-4"/>'),
     '🗺': svgIcon('<path d="M9 4 4 6v14l5-2 6 2 5-2V4l-5 2-6-2z"/><path d="M9 4v14M15 6v14"/>'),
+    // Second batch — added to cover every remaining glyph found in the app (arrows, media
+    // transport controls, misc tool/status icons) so nothing falls through to raw emoji.
+    '→': svgIcon('<path d="M4 12h14M13 6l6 6-6 6"/>'),
+    '➡': svgIcon('<path d="M4 12h14M13 6l6 6-6 6"/>'),
+    '🦴': svgIcon('<path d="M5 7a2 2 0 1 1 3-1.7l8 8A2 2 0 1 1 19 17a2 2 0 0 1-3 1.7l-8-8A2 2 0 0 1 5 7z"/>'),
+    '↺': svgIcon('<path d="M4 12a8 8 0 1 1 3 6.2"/><path d="M4 17v-4h4"/>'),
+    '▾': svgIcon('<path d="M6 9l6 6 6-6"/>'),
+    '▸': svgIcon('<path d="M9 6l6 6-6 6"/>'),
+    '▲': svgIcon('<path d="M12 6l7 12H5z"/>'),
+    '🧊': svgIcon('<path d="M12 3 20 7.5v9L12 21 4 16.5v-9z"/><path d="M12 3v18M4 7.5l8 4.5 8-4.5"/>'),
+    '📄': svgIcon('<path d="M6 3h9l3 3v15H6z"/><path d="M15 3v3h3"/>'),
+    '🔗': svgIcon('<path d="M9 15 15 9"/><path d="M11 6l1.5-1.5a4 4 0 0 1 5.5 5.5L16.5 11.5"/><path d="M13 18l-1.5 1.5a4 4 0 0 1-5.5-5.5L7.5 12.5"/>'),
+    '◎': svgIcon('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'),
+    '🧩': svgIcon('<path d="M9 4h3.5a1.5 1.5 0 0 1 0 3H12v2h3v-.5a1.5 1.5 0 1 1 3 0V12h2v3.5a1.5 1.5 0 0 1-3 0H15v3H9v-3H6.5a1.5 1.5 0 1 1 0-3H9v-3H6a1.5 1.5 0 1 1 0-3h3z"/>'),
+    '⇄': svgIcon('<path d="M4 8h13M13 4l4 4-4 4"/><path d="M20 16H7M11 12l-4 4 4 4"/>'),
+    '◐': svgIcon('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>'),
+    '⊗': svgIcon('<circle cx="12" cy="12" r="8"/><path d="M7.5 7.5l9 9M16.5 7.5l-9 9"/>'),
+    '🪞': svgIcon('<ellipse cx="12" cy="10" rx="7" ry="8"/><path d="M9 21h6M12 18v3"/>'),
+    '🛠': svgIcon('<path d="M5 5l5 5M3 21l7-7"/><path d="M14 3l7 7-3.5 3.5L14 10z"/>'),
+    '🎬': svgIcon('<path d="M3 8h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 8l2.5-4h3L6 8zM10.5 8l2.5-4h3L13.5 8zM18 8l2.5-4h1.5v4"/>'),
+    '🔤': svgIcon('<path d="M4 18l3-12 3 12M5 13h4"/><path d="M13 18V9h3a2.5 2.5 0 0 1 0 5h-3"/>'),
+    '🔎': svgIcon('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/>'),
+    '🧘': svgIcon('<circle cx="12" cy="5.5" r="2"/><path d="M12 8v3l-5 2v2M12 11l5 2v2M7 15l-1.5 4M17 15l1.5 4M9 19h6"/>'),
+    '🎞': svgIcon('<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 9h18M3 15h18"/>'),
+    '⏮': svgIcon('<path d="M6 6v12"/><path d="M18 6l-9 6 9 6z" fill="currentColor" stroke="none"/>'),
+    '⏭': svgIcon('<path d="M18 6v12"/><path d="M6 6l9 6-9 6z" fill="currentColor" stroke="none"/>'),
+    '❚': svgIcon('<rect x="6" y="5" width="4" height="14" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" fill="currentColor" stroke="none"/>'),
+    '🔷': svgIcon('<path d="M12 3 20 12 12 21 4 12z"/>'),
+    '➖': svgIcon('<path d="M5 12h14"/>'),
+    '👋': svgIcon('<path d="M9 12V6a1.4 1.4 0 0 1 2.8 0v5M11.8 11V4.5a1.4 1.4 0 0 1 2.8 0V11M14.6 11.3V6a1.4 1.4 0 0 1 2.8 0v9c0 3.5-2.3 6-6 6-2.3 0-3.6-1-4.7-2.5L4 14c-.6-.9.5-2 1.5-1.4L9 15"/>'),
+    '🧰': svgIcon('<rect x="3" y="10" width="18" height="9" rx="1.5"/><path d="M8 10V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M3 14h18"/>'),
+    '⚠': svgIcon('<path d="M12 3 22 20H2z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none"/>'),
+    '💡': svgIcon('<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>'),
+    '🌙': svgIcon('<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>'),
+    '⏩': svgIcon('<path d="M3 6l7 6-7 6z" fill="currentColor" stroke="none"/><path d="M13 6l7 6-7 6z" fill="currentColor" stroke="none"/>'),
+    '⏪': svgIcon('<path d="M21 6l-7 6 7 6z" fill="currentColor" stroke="none"/><path d="M11 6l-7 6 7 6z" fill="currentColor" stroke="none"/>'),
+    '➕': svgIcon('<path d="M12 5v14M5 12h14"/>'),
+    '🔀': svgIcon('<path d="M17 3h4v4"/><path d="M21 3l-7 7"/><path d="M3 16l4.5-4.5"/><path d="M3 8h3l4 4"/><path d="M3 16h3.5l4.5 4.5"/><path d="M17 21h4v-4"/><path d="M21 21l-6-6"/>'),
+    '📈': svgIcon('<path d="M3 18l6-6 4 4 8-8"/><path d="M15 8h6v6"/>'),
   };
   // Strips the invisible variation-selector (️) some emoji are written with (e.g. ⛰️, ↔️) so both
   // the plain and "presentation" forms of the same glyph resolve to the same line icon above.
@@ -2342,11 +2437,12 @@ window.__initForgeStudioApp = function () {
   // DISABLED: the flat monochrome line-icon swap above used to run on every button (via the
   // MutationObserver + queueIconize below), which is why the topbar (undo/redo/compass/folder/
   // layers/sun) rendered as plain outline glyphs while newer buttons like the Tree/Palm/Bush
-  // vegetation picker kept their full-color emoji. The app is meant to look like the colorful
-  // Tree/Palm/Bush icons everywhere, so the swap is turned off — every button now keeps its
-  // original color emoji glyph, tree included, with nothing converted to a flat line icon.
-  // new MutationObserver(queueIconize).observe(document.body, { childList: true, subtree: true, characterData: true });
-  // queueIconize();
+  // vegetation picker kept their full-color emoji, so the swap used to be left off.
+  // Re-enabled: the icon map above now covers every glyph used in the app (including the
+  // vegetation/asset icons), so the swap is consistent everywhere instead of partial — no
+  // button is left with a raw emoji that can render as "tofu" on some Android WebViews.
+  new MutationObserver(queueIconize).observe(document.body, { childList: true, subtree: true, characterData: true });
+  queueIconize();
 
   const assetLibraryModal = document.getElementById('assetLibraryModal');
   const assetLibraryGrid = document.getElementById('assetLibraryGrid');
@@ -2390,11 +2486,24 @@ window.__initForgeStudioApp = function () {
   // painting tool (Procreate, Nomad Sculpt, etc.) gives a tiny vibration on button taps and on
   // starting a stroke, and a stronger pulse for destructive or completed actions, so the UI feels
   // physically responsive instead of just "the screen changed". navigator.vibrate is widely
-  // supported on Android Chrome/WebView; iOS Safari has no vibration API at all, so this always
-  // feature-detects and silently no-ops there — never throws, never blocks anything it's attached to.
+  // supported on Android Chrome/WebView, but iOS Safari/WKWebView has NO vibration API at all —
+  // iOS users used to get zero tactile feedback regardless of pattern. When running inside the
+  // packaged Capacitor app, the Haptics plugin works on both platforms (it's the one that actually
+  // reaches the Taptic Engine on iOS), so it's tried first; navigator.vibrate is the Android-WebView
+  // fallback when Capacitor Haptics isn't present, and everything silently no-ops otherwise.
   // Patterns are short on purpose (10–18ms) so they read as a "click" rather than a buzz.
   const HAPTIC = { tap: 10, tick: 8, success: [14, 40, 14], warn: 22, delete: [12, 30, 12, 30, 20] };
   function haptic(pattern) {
+    try {
+      const capHaptics = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.Haptics;
+      if (capHaptics) {
+        if (pattern === HAPTIC.success) capHaptics.notification({ type: 'SUCCESS' });
+        else if (pattern === HAPTIC.warn) capHaptics.notification({ type: 'WARNING' });
+        else if (pattern === HAPTIC.delete) capHaptics.notification({ type: 'ERROR' });
+        else capHaptics.impact({ style: 'LIGHT' });
+        return;
+      }
+    } catch (e) { /* Capacitor Haptics unavailable on this build — fall through to navigator.vibrate */ }
     try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) { /* unsupported — no-op */ }
   }
   // Delegated at the document level (not per-button) so every current AND future button — topbar,
@@ -2412,6 +2521,74 @@ window.__initForgeStudioApp = function () {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 2400);
   }
+
+  // ============================================================
+  // CUSTOM MODAL SYSTEM — replaces native confirm()/prompt()/alert()
+  // ============================================================
+  // A single reusable glassmorphic modal, driven by customModal(opts) which returns a Promise —
+  // resolve(true)/resolve(value) on OK, resolve(false)/resolve(null) on Cancel/backdrop-tap/Escape.
+  // Call sites that used to do `if (!confirm(...)) return;` become
+  // `if (!(await customConfirm(...))) return;` inside an async function — same control flow,
+  // just non-blocking. See customConfirm()/customPrompt()/customAlert() below for the common cases.
+  const cmOverlay = document.getElementById('customModalOverlay');
+  const cmBox = document.getElementById('customModalBox');
+  const cmIconWrap = document.getElementById('customModalIconWrap');
+  const cmIcon = document.getElementById('customModalIcon');
+  const cmTitle = document.getElementById('customModalTitle');
+  const cmMsg = document.getElementById('customModalMsg');
+  const cmInput = document.getElementById('customModalInput');
+  const cmCancel = document.getElementById('customModalCancel');
+  const cmOk = document.getElementById('customModalOk');
+  let cmResolve = null;
+  const CM_ICON_QUESTION = '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.8 1c0 1.8-2.3 1.6-2.3 3.5"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/>';
+  const CM_ICON_WARN = '<path d="M12 3 22 20H2z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".8" fill="currentColor" stroke="none"/>';
+  const CM_ICON_EDIT = '<path d="M4 20l1-4L16 5l3 3L8 19l-4 1z"/><path d="M14 7l3 3"/>';
+  const CM_ICON_UNLOCK = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>';
+  function customModal(opts) {
+    opts = opts || {};
+    return new Promise((resolve) => {
+      cmResolve = resolve;
+      cmTitle.textContent = opts.title || '';
+      cmTitle.style.display = opts.title ? '' : 'none';
+      cmMsg.textContent = opts.message || '';
+      cmOverlay.classList.toggle('danger', !!opts.danger);
+      cmOverlay.classList.toggle('alert-only', opts.type === 'alert');
+      cmOverlay.classList.toggle('has-input', opts.type === 'prompt');
+      cmOk.textContent = opts.okText || (opts.type === 'alert' ? 'OK' : (opts.danger ? 'Delete' : 'OK'));
+      cmCancel.textContent = opts.cancelText || 'Cancel';
+      cmIcon.innerHTML = opts.iconSvg || (opts.type === 'prompt' ? CM_ICON_EDIT : (opts.danger ? CM_ICON_WARN : CM_ICON_QUESTION));
+      if (opts.type === 'prompt') {
+        cmInput.value = opts.defaultValue != null ? opts.defaultValue : '';
+        cmInput.placeholder = opts.placeholder || '';
+      }
+      cmOverlay.classList.add('show');
+      haptic(opts.danger ? HAPTIC.warn : HAPTIC.tick);
+      if (opts.type === 'prompt') {
+        setTimeout(() => { cmInput.focus(); cmInput.select(); }, 60);
+      }
+    });
+  }
+  function closeCustomModal(result) {
+    cmOverlay.classList.remove('show');
+    const r = cmResolve;
+    cmResolve = null;
+    if (r) r(result);
+  }
+  cmOk.addEventListener('click', () => {
+    if (cmOverlay.classList.contains('has-input')) closeCustomModal(cmInput.value);
+    else closeCustomModal(true);
+  });
+  cmCancel.addEventListener('click', () => closeCustomModal(cmOverlay.classList.contains('has-input') ? null : false));
+  cmOverlay.addEventListener('click', (e) => { if (e.target === cmOverlay) closeCustomModal(cmOverlay.classList.contains('has-input') ? null : false); });
+  cmInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); closeCustomModal(cmInput.value); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeCustomModal(null); }
+  });
+  // Convenience wrappers matching the native functions' call shape (message[, default]), so call
+  // sites read almost identically to the confirm()/prompt() they replace — just with `await`.
+  function customConfirm(message, opts) { return customModal(Object.assign({ type: 'confirm', message }, opts)); }
+  function customPrompt(message, defaultValue, opts) { return customModal(Object.assign({ type: 'prompt', message, defaultValue }, opts)); }
+  function customAlert(message, opts) { return customModal(Object.assign({ type: 'alert', message }, opts)); }
 
   // ---------- Undo toast: shows after a delete, gives a 30s window to reverse it. ----------
   // Used for Asset Library deletes (single "×" and multi-select "Delete selected") so an accidental
@@ -3138,12 +3315,12 @@ window.__initForgeStudioApp = function () {
   // If the GPU ever runs out of memory (e.g. an unexpectedly heavy import slips past our
   // mesh/vertex checks), show a clear message instead of leaving a blank white screen.
   //
-  // BUGFIX: the browser/WebView also fires this exact same "context lost" event for totally
-  // harmless reasons — most commonly, turning the phone's screen off and back on (Android reclaims
-  // the GPU context while the screen is off, then hands a fresh one back on resume). That is NOT an
-  // out-of-memory situation, so we no longer show the scary blocking error immediately. Instead we
-  // give it a few seconds to auto-restore (a screen-lock cycle restores almost instantly); only if
-  // it's still lost after that do we treat it as the genuine heavy-model OOM case.
+  // The browser/WebView also fires this exact same "context lost" event for totally harmless
+  // reasons — most commonly, turning the phone's screen off and back on (Android reclaims the GPU
+  // context while the screen is off, then hands a fresh one back on resume). That is NOT an
+  // out-of-memory situation, so don't show the blocking error immediately — give it a few seconds
+  // to auto-restore (a screen-lock cycle restores almost instantly); only if it's still lost after
+  // that treat it as the genuine heavy-model OOM case.
   let contextLostTimer = null;
   renderer.domElement.addEventListener('webglcontextlost', (e) => {
     e.preventDefault(); // required to allow the browser to hand back a restored context at all
@@ -3159,9 +3336,9 @@ window.__initForgeStudioApp = function () {
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     clearTimeout(contextLostTimer);
-    // BUGFIX: the context coming back does NOT mean the GPU still has the old texture/geometry data
-    // — that's exactly why models render solid black after unlocking the phone. Force everything
-    // currently in the scene to re-upload to the (new) GPU context.
+    // The context coming back does NOT mean the GPU still has the old texture/geometry data — a
+    // restored context is a fresh one, so force everything currently in the scene to re-upload to it
+    // (otherwise models render solid black after the phone unlocks).
     scene.traverse(o => {
       if (o.isMesh) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -3352,7 +3529,20 @@ window.__initForgeStudioApp = function () {
   // to load/play — used for the library slot unlock so a missing fill (or testing outside the
   // packaged app) never blocks the person from getting their extra slots. Leave false (default) for
   // unlocks that should only ever be earned by actually finishing an ad (e.g. the 4K unlock).
-  function showRewardedAdToUnlock(featureLabel, adUnitId, onReward, alwaysGrant) {
+  // promptOpts ({ title, description }): shown in a proper explanatory modal — with an unlock icon,
+  // a clear "why" and a Watch ad / Not now choice — before the ad itself ever loads, replacing the
+  // old bare "Watch ad for +10 slots" toast the feature used to jump straight into.
+  async function showRewardedAdToUnlock(featureLabel, adUnitId, onReward, alwaysGrant, promptOpts) {
+    promptOpts = promptOpts || {};
+    const proceed = await customModal({
+      type: 'confirm',
+      title: promptOpts.title || 'Unlock this for free',
+      message: promptOpts.description || 'Watch a short ad to unlock this — no purchase needed.',
+      okText: 'Watch ad',
+      cancelText: 'Not now',
+      iconSvg: CM_ICON_UNLOCK,
+    });
+    if (!proceed) return;
     const plugin = window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.AdMob;
     if (!plugin) {
       if (alwaysGrant) { onReward(); toast(featureLabel, 2600); return; }
@@ -3402,14 +3592,16 @@ window.__initForgeStudioApp = function () {
   function libraryHasRoomFor(n) { return (libraryAssets.length + n) <= (FREE_LIBRARY_LIMIT + getLibraryBonusSlots()); }
   function showLibraryLimitPrompt() {
     const cap = FREE_LIBRARY_LIMIT + getLibraryBonusSlots();
-    toast('Library is full (' + cap + ' slots used up) — watch a short ad for +' + LIBRARY_CREDIT_PER_AD + ' more slots.', 3400);
     // alwaysGrant=true: even if no ad fills or the ad SDK errors out, the person still gets their
     // +10 slots — a missing/failed ad should never be the thing standing between them and saving
     // their work.
     showRewardedAdToUnlock('+' + LIBRARY_CREDIT_PER_AD + ' library slots unlocked!', LIBRARY_REWARDED_AD_ID, () => {
       addLibraryBonusSlots(LIBRARY_CREDIT_PER_AD);
       renderAssetLibraryGrid();
-    }, true);
+    }, true, {
+      title: 'Library is full',
+      description: 'You\'ve used all ' + cap + ' slots. Watch a short ad to permanently add ' + LIBRARY_CREDIT_PER_AD + ' more slots — free, no purchase needed.',
+    });
   }
 
   const FREE_TEX_SIZE = 2048, PREMIUM_TEX_SIZE = 4096;
@@ -3434,6 +3626,9 @@ window.__initForgeStudioApp = function () {
         TEX_SIZE = PREMIUM_TEX_SIZE;
         toast('4K unlocked for this session — reload/reopen the current model to paint and export at the new resolution. Closing the app will reset this back to 2K.', 4600);
         refreshUI();
+      }, false, {
+        title: 'Unlock 4K textures',
+        description: 'Watch a short ad to paint and export at 4K resolution for the rest of this session. Resets back to 2K next time you open the app.',
       });
       box.appendChild(btn);
     }
@@ -3623,18 +3818,13 @@ window.__initForgeStudioApp = function () {
   // "front" faces, which is exactly (and only) what needs correcting on a mirrored mesh.
   function reverseGeometryWinding(geo) {
     if (geo.index) {
-      // PERF/CORRECTNESS FIX: for indexed geometry, every vertex attribute (position, normal, uv...)
-      // is stored ONCE per unique vertex and simply referenced multiple times through the index
-      // array. Reversing the index order per triangle already fully reverses the winding for every
-      // attribute at once — touching the attribute arrays themselves is both unnecessary AND wrong
-      // (it would shuffle shared vertex data using per-triangle positions that don't correspond to
-      // actual vertex identity in indexed data). This is also exactly why big imported maps (almost
-      // always indexed, often hundreds of thousands of verts) went from "slow" to "never finishes":
-      // the old code additionally ran a getComponent/setComponent loop — one of the slowest possible
-      // per-vertex access patterns in three.js — across normal/uv/uv2/color for every single
-      // triangle, on top of doing real work. Small non-indexed character meshes barely touched that
-      // path, which is why only map uploads stalled. This direct typed-array swap is the only work
-      // needed, and it's fast even at map scale.
+      // For indexed geometry, every vertex attribute (position, normal, uv...) is stored ONCE per
+      // unique vertex and simply referenced multiple times through the index array. Reversing the
+      // index order per triangle already fully reverses the winding for every attribute at once —
+      // touching the attribute arrays themselves would be both unnecessary and wrong (it would
+      // shuffle shared vertex data using per-triangle positions that don't correspond to actual
+      // vertex identity in indexed data). This direct index swap is the only work needed, and it
+      // stays fast even at map scale (hundreds of thousands of verts).
       const arr = geo.index.array;
       for (let i = 0; i + 2 < arr.length; i += 3) { const t = arr[i + 1]; arr[i + 1] = arr[i + 2]; arr[i + 2] = t; }
       geo.index.needsUpdate = true;
@@ -3704,13 +3894,11 @@ window.__initForgeStudioApp = function () {
   // load/error event instead of guessing off a clock, so nothing gets nulled just for being slow.
   function waitForTextureThenFix(mat, key, tex, onSettled) {
     let settled = false;
-    // BUGFIX: this used to read tex.image ONCE, synchronously, the instant the model finished
-    // parsing — but FBXLoader/TextureLoader kick off image decoding asynchronously, so the actual
-    // <img> element usually doesn't exist yet at that exact tick (tex.image is still undefined).
-    // The old code treated "doesn't exist YET" the same as "will never exist" and immediately
-    // nulled out perfectly good embedded textures before they ever had a chance to load — which is
-    // why FBX models (character or map) so often rendered with no texture at all. Poll briefly for
-    // the loader to actually create the image element before concluding there's nothing to wait for.
+    // FBXLoader/TextureLoader kick off image decoding asynchronously, so tex.image usually doesn't
+    // exist yet the instant a model finishes parsing — reading it synchronously at that point would
+    // wrongly treat "doesn't exist YET" as "will never exist" and null out a perfectly good embedded
+    // texture. Poll briefly for the loader to actually create the image element before concluding
+    // there's nothing to wait for.
     let pollTries = 0;
     const MAX_POLL_TRIES = 40; // ~2s at 50ms — plenty for the loader to create the <img>, even on a slow phone
     const attachListeners = (img) => {
@@ -4481,11 +4669,9 @@ window.__initForgeStudioApp = function () {
 
     const mat = new THREE.MeshStandardMaterial({
       map: texture,
-      // FIX: previously always hardcoded roughness 0.75 / metalness 0.05 and dropped every other
-      // PBR map the source material had. That's why a character with a real normal/roughness/AO
-      // texture set came out flat after combine-and-export — only the base color survived. These
-      // extra maps aren't painted on the canvas (painting only ever touched base color), so they're
-      // carried over by direct reference from the source material and exported as-is alongside it.
+      // Painting only ever touches base color, so every other PBR map (normal/roughness/AO/etc.) is
+      // carried over by direct reference from the source material and exported as-is alongside it —
+      // otherwise a character with a real texture set would come out flat after combine-and-export.
       normalMap: srcMat && srcMat.normalMap || null,
       roughnessMap: srcMat && srcMat.roughnessMap || null,
       roughness: (srcMat && typeof srcMat.roughness === 'number') ? srcMat.roughness : 0.75,
@@ -4500,31 +4686,25 @@ window.__initForgeStudioApp = function () {
       bumpScale: (srcMat && typeof srcMat.bumpScale === 'number') ? srcMat.bumpScale : 1,
       transparent: !!(srcMat && srcMat.transparent),
       opacity: (srcMat && typeof srcMat.opacity === 'number') ? srcMat.opacity : 1,
-      // FIX: alphaTest wasn't being carried over at all. Hair-card meshes (and foliage, fences,
-      // etc.) are almost always authored as alpha-CUTOUT, not alpha-blend — Godot and most engines
-      // render them with alphaTest (a hard cutoff), which is what actually cuts the strand shapes
-      // out of a rectangular card. Without it here, the whole rectangular card drew solid/opaque —
-      // this is why hair that looked right in Godot came out as a blocky solid clump in this viewer.
-      // Default to a sensible cutoff (0.5) when the mesh has an alphaMap but the source material
-      // never set one explicitly, since a dropped alphaTest is far more visually broken than a
-      // slightly-off default cutoff.
-      // FIX 2: the fallback below used to fire for ANY material with an alphaMap, no matter what
-      // alpha mode the source actually authored. A glTF/GLB material set to alphaMode "BLEND" (soft,
-      // anti-aliased edges — e.g. hair strands, lace/ruffle trim) already comes through here with
-      // srcMat.transparent === true and srcMat.alphaTest left at its default 0. Forcing a hard 0.5
-      // cutoff on top of that discards every pixel under 50% alpha, which for a soft blended edge is
-      // most of the texture — that's what was eating chunks of the hair/ruffle instead of just their
-      // edges. Only fall back to the cutout guess when the source material ISN'T already marked
-      // transparent (that's the real "engine never set alphaTest explicitly" cutout case this
-      // fallback was meant for, e.g. some FBX/Godot exports).
+      // Hair-card meshes (and foliage, fences, etc.) are almost always authored as alpha-CUTOUT, not
+      // alpha-blend — Godot and most engines render them with alphaTest (a hard cutoff), which is
+      // what cuts the strand shapes out of a rectangular card; without it the whole card draws
+      // solid/opaque. Default to a sensible cutoff (0.5) when the mesh has an alphaMap but the source
+      // material never set one explicitly, since a dropped alphaTest is far more visually broken than
+      // a slightly-off default cutoff.
+      // That fallback should only fire for the real "engine never set alphaTest" cutout case (e.g.
+      // some FBX/Godot exports) — a glTF/GLB material set to alphaMode "BLEND" (soft, anti-aliased
+      // edges: hair strands, lace/ruffle trim) already comes through with srcMat.transparent === true
+      // and alphaTest left at its default 0, and forcing a hard 0.5 cutoff on top of that would
+      // discard most of a soft blended edge's pixels. So the fallback only applies when the source
+      // material isn't already marked transparent.
       alphaTest: (srcMat && typeof srcMat.alphaTest === 'number' && srcMat.alphaTest > 0) ? srcMat.alphaTest : ((srcMat && srcMat.alphaMap && !srcMat.transparent) ? 0.5 : 0),
       skinning: !!(mesh.isSkinnedMesh),
-      // FIX: this material never set `side`, so it defaulted to THREE.FrontSide. Any face whose
-      // normal/winding points "backwards" (extremely common on hair cards, and on body panels that
-      // came from a Blender/Godot export with mixed winding order) was simply culled and never drawn
-      // — this is what showed up as a patchy/partial GLB body and hair that vanished entirely on FBX
-      // import. The tooDense fallback path already force-doublesides the model (forceDoubleSided()),
-      // this per-mesh paint-canvas path just never got the same treatment.
+      // Without an explicit `side`, this material would default to THREE.FrontSide and cull any face
+      // whose normal/winding points "backwards" — extremely common on hair cards, and on body panels
+      // from a Blender/Godot export with mixed winding order. The tooDense fallback path already
+      // force-doublesides the model (forceDoubleSided()); this per-mesh paint-canvas path needs the
+      // same treatment.
       side: THREE.DoubleSide,
     });
     // normalScale/emissive are THREE.Vector2/Color objects, not primitives — passing `undefined`
@@ -5684,14 +5864,11 @@ window.__initForgeStudioApp = function () {
     let addedCount = 0;
     let retargetInfo = null;
     if (!clips || !clips.length) return { addedCount, retargetInfo };
-    // FIX: `obj` was just parsed from a file and was never added to the scene, so its
-    // (and its bones') matrixWorld is still the default identity matrix — every bone's
-    // getWorldPosition() below would read back (0,0,0). That made estimateRigHeight()
-    // return 0 for the source rig, which fell back to 1, which made the target/source
-    // scale ratio come out as the target's raw height (often 100x+ too big/small) —
-    // that's what was blowing up the character size and mangling root-motion on import.
-    // charRoot is normally kept in sync by the render loop, but force it too for safety
-    // in case a clip is added before the first frame has rendered.
+    // `obj` was just parsed from a file and was never added to the scene, so its (and its bones')
+    // matrixWorld is still the default identity matrix — every bone's getWorldPosition() below would
+    // read back (0,0,0), which would make estimateRigHeight() return 0 and badly mis-scale the
+    // target/source ratio. charRoot is normally kept in sync by the render loop, but force it too for
+    // safety in case a clip is added before the first frame has rendered.
     obj.updateMatrixWorld(true);
     charRoot.updateMatrixWorld(true);
     const sourceBones = collectBones(obj);
@@ -6257,16 +6434,15 @@ window.__initForgeStudioApp = function () {
     loadCharacterObject(group, 'Demo sphere');
   }
 
-  // ROBUSTNESS FIX: every loader class (FBXLoader, OBJLoader, GLTFLoader, and FBXLoader's own
-  // fflate dependency) is fetched once via a plain <script> tag when the PAGE loads. If any single
-  // one of those requests drops (flaky mobile data, a CDN edge having an off moment, WebView
-  // aggressively caching a broken response) that specific loader is simply undefined for the rest
-  // of the session — nothing ever retries it, so every import of that format fails from then on
-  // even once the connection is fine again, while formats whose script DID load keep working (a
-  // GLB working while FBX doesn't is exactly this: GLTFLoader.js happened to load, FBXLoader.js or
-  // fflate didn't). This checks the actual class exists right before each use and, if missing,
-  // fetches it fresh from jsdelivr and then two mirror CDNs in turn before giving up — so a one-off
-  // network blip only costs one retry instead of breaking that format for the whole session.
+  // Every loader class (FBXLoader, OBJLoader, GLTFLoader, and FBXLoader's own fflate dependency) is
+  // fetched once via a plain <script> tag when the page loads. If any single one of those requests
+  // drops (flaky mobile data, a CDN edge having an off moment, WebView aggressively caching a broken
+  // response), that specific loader would simply stay undefined for the rest of the session — every
+  // import of that format failing from then on, even once the connection is fine again, while
+  // formats whose script did load keep working. This checks the actual class exists right before
+  // each use and, if missing, fetches it fresh from jsdelivr and then two mirror CDNs in turn before
+  // giving up — so a one-off network blip only costs one retry instead of breaking that format for
+  // the whole session.
   function loadScriptWithFallback(urls, timeoutMs) {
     return new Promise((resolve, reject) => {
       let i = 0;
@@ -6906,8 +7082,8 @@ window.__initForgeStudioApp = function () {
     return card;
   }
 
-  function renameProjectRecord(rec, cb) {
-    const nn = prompt('Rename project', rec.name);
+  async function renameProjectRecord(rec, cb) {
+    const nn = await customPrompt('Choose a new name for this project.', rec.name, { title: 'Rename project' });
     if (!nn || !nn.trim()) return;
     rec.name = nn.trim();
     dbPutProject(rec).then(() => {
@@ -6916,8 +7092,8 @@ window.__initForgeStudioApp = function () {
       if (cb) cb();
     });
   }
-  function deleteProjectRecord(rec, cb) {
-    if (!confirm('Delete project "' + rec.name + '"? This cannot be undone.')) return;
+  async function deleteProjectRecord(rec, cb) {
+    if (!(await customConfirm('Delete project "' + rec.name + '"? This cannot be undone.', { danger: true }))) return;
     dbDeleteProject(rec.id).then(() => {
       projectsCache = projectsCache.filter(r => r.id !== rec.id);
       if (rec.id === currentProjectId) { currentProjectId = null; currentProjectName = 'Untitled project'; refreshUI(); }
@@ -7022,6 +7198,8 @@ window.__initForgeStudioApp = function () {
   document.getElementById('settingsCloseBtn').onclick = closeSettingsModal;
   document.getElementById('settingsReplayOnboardingBtn').onclick = () => {
     closeSettingsModal();
+    onboardingStep = 0;
+    renderOnboardingStep();
     document.getElementById('onboardingOverlay').classList.add('show');
   };
   document.getElementById('settingsClearAutosaveBtn').onclick = () => {
@@ -7029,19 +7207,13 @@ window.__initForgeStudioApp = function () {
   };
 
   // ---------- Theme (appearance + accent color) ----------
-  // Same ACCENT_PRESETS as the tiny pre-paint script in <head> (kept in sync manually — that copy
-  // has to run standalone before this script exists). Every button/panel in the app is already
-  // built on the shared --accent*/--bg/--panel*/--ink* CSS tokens (see the PREMIUM PASS comment
-  // near the top of the stylesheet), so switching these variables re-themes the whole app in one
-  // shot — no other file or per-tool code needs to know theming exists.
-  const ACCENT_PRESETS = {
-    orange: { label: 'Orange', a: '#ff8a4c', a2: '#ffc98a', a3: '#e2632a', dim: '#5a3a2b', glow: 'rgba(255,138,76,0.35)', grad: 'linear-gradient(135deg, #ffb066 0%, #ff7a3d 55%, #e2632a 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,176,102,0.16), rgba(226,99,42,0.08))' },
-    blue: { label: 'Blue', a: '#4c9aff', a2: '#8ac2ff', a3: '#2a63e2', dim: '#2b3a5a', glow: 'rgba(76,154,255,0.35)', grad: 'linear-gradient(135deg, #6cb2ff 0%, #3d84ff 55%, #2a63e2 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,166,255,0.16), rgba(42,99,226,0.08))' },
-    green: { label: 'Green', a: '#52d18a', a2: '#96e8bb', a3: '#2a9e5c', dim: '#254a35', glow: 'rgba(82,209,138,0.35)', grad: 'linear-gradient(135deg, #78e0a6 0%, #45c67f 55%, #2a9e5c 100%)', gradsoft: 'linear-gradient(135deg, rgba(102,224,166,0.16), rgba(42,158,92,0.08))' },
-    purple: { label: 'Purple', a: '#b083ff', a2: '#d6bbff', a3: '#7c3fe2', dim: '#3a2b5a', glow: 'rgba(176,131,255,0.35)', grad: 'linear-gradient(135deg, #c8a4ff 0%, #a56aff 55%, #7c3fe2 100%)', gradsoft: 'linear-gradient(135deg, rgba(198,164,255,0.16), rgba(124,63,226,0.08))' },
-    red: { label: 'Red', a: '#ff6363', a2: '#ffa3a3', a3: '#d92c2c', dim: '#5a2b2b', glow: 'rgba(255,99,99,0.35)', grad: 'linear-gradient(135deg, #ff8a8a 0%, #ff5252 55%, #d92c2c 100%)', gradsoft: 'linear-gradient(135deg, rgba(255,138,138,0.16), rgba(217,44,44,0.08))' },
-    teal: { label: 'Teal', a: '#3ed6c4', a2: '#8aeee2', a3: '#1f9e8f', dim: '#254a46', glow: 'rgba(62,214,196,0.35)', grad: 'linear-gradient(135deg, #6ee6d8 0%, #33c4b1 55%, #1f9e8f 100%)', gradsoft: 'linear-gradient(135deg, rgba(110,230,216,0.16), rgba(31,158,143,0.08))' }
-  };
+  // ACCENT_PRESETS is read from the shared #accentPresetsData JSON blob in <head> — see its comment
+  // — so this is no longer a hand-maintained duplicate of the tiny pre-paint script's copy. Every
+  // button/panel in the app is already built on the shared --accent*/--bg/--panel*/--ink* CSS
+  // tokens (see the PREMIUM PASS comment near the top of the stylesheet), so switching these
+  // variables re-themes the whole app in one shot — no other file or per-tool code needs to know
+  // theming exists.
+  const ACCENT_PRESETS = JSON.parse(document.getElementById('accentPresetsData').textContent);
   function currentThemeMode() { try { return localStorage.getItem('themeMode') || 'light'; } catch (e) { return 'light'; } }
   function currentAccentName() { try { return localStorage.getItem('themeAccent') || 'orange'; } catch (e) { return 'orange'; } }
   function applyThemeMode(mode) {
@@ -7086,6 +7258,11 @@ window.__initForgeStudioApp = function () {
   }
   document.getElementById('btn-theme').onclick = () => openSettingsModal();
 
+  // ============================================================
+  // ASSET LIBRARY (continued) — thumbnails, file/texture handling, and the add/remove/variant/
+  // parts-picker flows that back the library grid introduced further up (see the ASSET LIBRARY
+  // header above for the overview).
+  // ============================================================
   // A single reused offscreen renderer for thumbnails, so we never pile up extra WebGL contexts
   // (mobile browsers only allow a handful of live contexts at once).
   let thumbRenderer = null, thumbScene = null, thumbCamera = null;
@@ -7853,6 +8030,11 @@ window.__initForgeStudioApp = function () {
   }
 
   let mapObjects = [];       // { id, mesh, name, category, locked, hidden, baseTransform }
+  // ============================================================
+  // MAP OBJECTS — the per-object bookkeeping (mapObjects array + mapObject wrapper records) for
+  // everything placed on the map: selection (single/multi), the objHistory/objRedo undo stack,
+  // highlight state, and transform snapshot/apply/duplicate/delete helpers.
+  // ============================================================
   let mapObjectSeq = 1;
   let selectedIds = [];      // ordered array of mapObject ids currently selected
   let multiSelectOn = false;
@@ -8036,6 +8218,11 @@ window.__initForgeStudioApp = function () {
     return newEntry;
   }
 
+  // ============================================================
+  // TERRAIN — creation (primitive ground + custom imported meshes), heightmap generation/import,
+  // ground texture, and the resolution/activate/deactivate lifecycle. Sculpting itself (brush math,
+  // undo, erosion) follows further below.
+  // ============================================================
   function disposeTerrainRoot() {
     if (terrainRoot) {
       scene.remove(terrainRoot);
@@ -8085,9 +8272,9 @@ window.__initForgeStudioApp = function () {
   // buttons used to call newTerrain() directly with no warning, silently discarding the current
   // ground (and any placed objects on it) the instant you tapped a size — inconsistent with every
   // other destructive action in the app (Delete, Merge, New project), which all confirm() first.
-  function newTerrainConfirmed(sizeM, segs, style) {
+  async function newTerrainConfirmed(sizeM, segs, style) {
     const hasContent = terrainRoot && (terrainIsCustom || mapObjects.length > 0 || terrainSculptedSinceHeightmap);
-    if (hasContent && !confirm('Start a new ' + sizeM + 'm ground? This replaces the current terrain and everything placed on it. Export or save your project first if you want to keep it.')) return;
+    if (hasContent && !(await customConfirm('This replaces the current terrain and everything placed on it. Export or save your project first if you want to keep it.', { title: 'Start a new ' + sizeM + 'm ground?', danger: true }))) return;
     newTerrain(sizeM, segs, style);
   }
   function newTerrain(sizeM, segs, style) {
@@ -8128,23 +8315,18 @@ window.__initForgeStudioApp = function () {
     const { meshCount, verts } = countMeshesAndVerts(obj);
     terrainMeshStats = { meshCount, verts };
     terrainTooDense = meshCount > MAX_PAINTABLE_MESHES || verts > MAX_PAINTABLE_VERTS;
-    // BUGFIX: recompute every mesh's normals fresh from its actual (correct, untouched) vertex
-    // positions right after load. Sculpted terrain saved via Save Project → GLB export/re-import
-    // was coming back with its LIGHTING inverted — every pit shaded like a bump and every mountain
-    // shaded like a pit — even though the real vertex heights round-tripped correctly. That's a
-    // classic "hollow-face" optical illusion: it's the surface normals (which way each face's
-    // "outward" points, used only for lighting) that were getting mangled by the GLB export/import
-    // round-trip, not the actual geometry, but visually it read as the shapes themselves flipping —
-    // and sculpting further on top of the wrongly-lit shape then genuinely confused the real data,
-    // matching "kaam karte karte project kharab ho jaata hai". Recomputing here throws away whatever
-    // normals came from the file and derives fresh ones straight from the real positions, so the
-    // shading always matches the actual terrain regardless of what the round-trip did to normals.
-    // FIX: un-mirror any mesh sitting under a negative-scale (mirrored) transform BEFORE computing
-    // normals — otherwise computeVertexNormals() faithfully recomputes the WRONG (flipped) normals
-    // from the mirrored winding, and every raycast against that surface (vegetation's slope check,
-    // ground-lock, "align to ground") sees it facing down instead of up. See fixMirroredMeshWinding
-    // above for the full story — this is the actual cause of vegetation refusing to place at all on
-    // imported maps.
+    // Recompute every mesh's normals fresh from its actual vertex positions right after load. A GLB
+    // export/re-import round-trip can mangle surface normals (which way each face's "outward" points,
+    // used only for lighting) without touching the real vertex heights — a classic "hollow-face"
+    // optical illusion where every pit shades like a bump and every mountain like a pit even though
+    // the geometry itself is correct. Recomputing here throws away whatever normals came from the
+    // file and derives fresh ones straight from the real positions, so shading always matches the
+    // actual terrain regardless of what the round-trip did to normals.
+    // Un-mirror any mesh sitting under a negative-scale (mirrored) transform BEFORE computing normals
+    // — otherwise computeVertexNormals() faithfully recomputes the WRONG (flipped) normals from the
+    // mirrored winding, and every raycast against that surface (vegetation's slope check, ground-lock,
+    // "align to ground") sees it facing down instead of up. See fixMirroredMeshWinding above for the
+    // full story.
     fixMirroredMeshWinding(obj);
     obj.traverse(o => { if (o.isMesh && o.geometry) o.geometry.computeVertexNormals(); });
     if (terrainTooDense) {
@@ -8372,13 +8554,12 @@ window.__initForgeStudioApp = function () {
       const off = document.createElement('canvas');
       off.width = res; off.height = res;
       const octx = off.getContext('2d');
-      // FIX: canvas 2D defaults imageSmoothingEnabled to true, which runs the source image through
-      // the browser's own bilinear/bicubic resampler here — completely outside the Smoothness slider's
-      // control, and even active when Smoothness is 0. That hidden blur was what made small pits/hills
-      // consistently come out looking 2-3x wider and rounder than their actual footprint in the source
-      // image. Forcing nearest-neighbor here means a feature's on-terrain size now matches its source
-      // pixel footprint exactly at Smoothness 0 — any spreading/rounding from here on is only the
-      // Smoothness + Feature Sharpness controls below, both of which the user can dial down to 0.
+      // Canvas 2D defaults imageSmoothingEnabled to true, which would run the source image through
+      // the browser's own bilinear/bicubic resampler here — completely outside the Smoothness
+      // slider's control, and active even when Smoothness is 0. Forcing nearest-neighbor means a
+      // feature's on-terrain size matches its source pixel footprint exactly at Smoothness 0 — any
+      // spreading/rounding from here on is only the Smoothness + Feature Sharpness controls below,
+      // both of which the user can dial down to 0.
       octx.imageSmoothingEnabled = false;
       octx.drawImage(terrainHeightmapImg, 0, 0, res, res);
       const data = octx.getImageData(0, 0, res, res).data;
@@ -8521,6 +8702,11 @@ window.__initForgeStudioApp = function () {
     if (terrainRoot) scene.remove(terrainRoot);
   }
 
+  // ============================================================
+  // TERRAIN SCULPTING — vertex-height brush math (raise/lower/smooth/flatten), mountain stamping,
+  // undo/redo for all of it, and erosion simulation. Ground/vertex-color painting is a separate
+  // subsystem (see PRO TEXTURE SYSTEM below).
+  // ============================================================
   // ---------- Terrain sculpt/mountain/paint undo — feeds the SAME global objHistory/objRedo stack
   // as every other edit (see pushObjHistory), so one global Undo/Redo works everywhere, whatever
   // tool you used last. terrainSaveUndo() captures the "before" state (called once per stroke, or
@@ -8928,9 +9114,9 @@ window.__initForgeStudioApp = function () {
     compositePaintTarget(target);
     buildTerrainDock();
   }
-  function renamePaintLayer(target, id) {
+  async function renamePaintLayer(target, id) {
     const l = target.layers.find(x => x.id === id); if (!l) return;
-    const nn = prompt('Layer name', l.name);
+    const nn = await customPrompt('Choose a new name for this layer.', l.name, { title: 'Rename layer' });
     if (nn && nn.trim()) { l.name = nn.trim().slice(0, 40); buildTerrainDock(); }
   }
   function loadBrushTextureImage(file) {
@@ -9472,10 +9658,9 @@ window.__initForgeStudioApp = function () {
   function groundRaycastTargets() {
     if (terrainIsCustom) {
       if (terrainPaintMeshes.length) return terrainPaintMeshes.map(p => p.mesh); // the imported map's own surfaces, captured before any object was ever placed
-      // FIX: terrainPaintMeshes is only ever populated for maps under the paintable mesh/vert
-      // budget (see terrainTooDense) — for a real, heavy imported map it stays empty forever, which
-      // silently made Ground Lock and Align-to-Ground into no-ops on exactly the maps people
-      // actually upload. Fall back to walking terrainRoot directly, still excluding vegetationGroup
+      // terrainPaintMeshes is only ever populated for maps under the paintable mesh/vert budget (see
+      // terrainTooDense) — for a heavy imported map it stays empty, so Ground Lock and
+      // Align-to-Ground need a fallback: walk terrainRoot directly, still excluding vegetationGroup
       // so a locked object still can't "ground" on itself or on another placed object.
       if (!terrainRoot) return [];
       const list = [];
@@ -9539,10 +9724,10 @@ window.__initForgeStudioApp = function () {
     });
   }
 
-  function deleteSimilar(entry) {
+  async function deleteSimilar(entry) {
     const matches = findSimilarObjects(entry);
     if (!matches.length) { toast('No similar objects found.', 1800); return; }
-    if (!confirm('Delete ' + matches.length + ' similar "' + entry.category + '" object(s)? This can be undone.')) return;
+    if (!(await customConfirm('Delete ' + matches.length + ' similar "' + entry.category + '" object(s)? This can be undone.', { danger: true }))) return;
     deleteMapObjects(matches.map(m => m.id), 'delete ' + matches.length + ' similar ' + entry.category);
     clearSelection();
     refreshUI();
@@ -10513,12 +10698,9 @@ window.__initForgeStudioApp = function () {
     if (!entry) { toast('Select a block first, then place a model on it.', 2200); return; }
     const placeName = rec.name + (partName ? ' — ' + partName : '');
     const useObj = (obj) => {
-      // BUGFIX: this used to walk the loaded model and keep only the FIRST mesh it found
-      // (`if (!newMesh && o.isMesh) newMesh = o`), throwing away every other part. Any model made
-      // of multiple meshes (body + wheels + details, etc.) would silently place just one piece —
-      // often something tiny like a bolt or a collision proxy — while the full model still exported
-      // fine in the GLB (which is exactly why it looked correct once opened in Godot but not here).
-      // Fix: keep and place the WHOLE loaded group, not a single mesh plucked out of it.
+      // Keep and place the WHOLE loaded group, not a single mesh plucked out of it — a model made of
+      // multiple meshes (body + wheels + details, etc.) needs all of them, not just whichever one a
+      // "first mesh found" walk happens to hit first.
       let hasMesh = false;
       obj.traverse(o => { if (o.isMesh) hasMesh = true; });
       if (!hasMesh) { hideLoading(); toast('That saved model has no mesh to place.', 2400); return; }
@@ -10682,10 +10864,10 @@ window.__initForgeStudioApp = function () {
       }
     });
   }
-  function finishDeleteBrush() {
+  async function finishDeleteBrush() {
     if (!pendingDeleteIds.length) return;
     const n = pendingDeleteIds.length;
-    if (n > 5 && !confirm('Delete ' + n + ' object(s)?')) { pendingDeleteIds.forEach(id => { const e = getMapObject(id); if (e) setHighlight(e, false); }); pendingDeleteIds = []; return; }
+    if (n > 5 && !(await customConfirm('Delete ' + n + ' object(s)?', { danger: true }))) { pendingDeleteIds.forEach(id => { const e = getMapObject(id); if (e) setHighlight(e, false); }); pendingDeleteIds = []; return; }
     deleteMapObjects(pendingDeleteIds, 'delete brush (' + n + ')');
     pendingDeleteIds = [];
     refreshUI();
@@ -11010,14 +11192,14 @@ window.__initForgeStudioApp = function () {
   // ============================================================
   // OPTIMIZATION — non-destructive layer hiding, geometry merge-by-material, texture downscale
   // ============================================================
-  function mergeCategoryByMaterial(category) {
+  async function mergeCategoryByMaterial(category) {
     if (!(THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries)) {
       toast('Merge tool unavailable — the geometry-merge library failed to load.', 2600);
       return;
     }
     const targets = mapObjects.filter(o => o.category === category && !o.locked && o.mesh.isMesh);
     if (targets.length < 2) { toast('Need at least 2 objects in this category to merge.', 2000); return; }
-    if (!confirm('Merge ' + targets.length + ' "' + category + '" object(s) into fewer meshes to speed up rendering? They will no longer be individually selectable. This cannot be undone.')) return;
+    if (!(await customConfirm('Merge ' + targets.length + ' "' + category + '" object(s) into fewer meshes to speed up rendering? They will no longer be individually selectable. This cannot be undone.', { danger: true }))) return;
     const byMatUuid = {};
     targets.forEach(t => {
       const mat = firstMaterialOf(t.mesh);
@@ -11165,8 +11347,8 @@ window.__initForgeStudioApp = function () {
     if (!raw) return;
     let data; try { data = JSON.parse(raw); } catch (e) { return; }
     if (!data || !data.objects || !data.objects.length) return;
-    setTimeout(() => {
-      if (confirm('Recover edit metadata from your last session (' + data.objects.length + ' object(s), saved ' + new Date(data.savedAt).toLocaleString() + ')?\n\nThis restores positions/categories/visibility only — import the same map file first, then this will re-apply automatically after import.')) {
+    setTimeout(async () => {
+      if (await customConfirm('This restores positions/categories/visibility only — import the same map file first, then this will re-apply automatically after import.', { title: 'Recover edit metadata from your last session (' + data.objects.length + ' object(s), saved ' + new Date(data.savedAt).toLocaleString() + ')?' })) {
         window._pendingRecovery = data;
         toast('Recovery data loaded — import your map now to apply it.', 4200);
       } else {
@@ -11496,9 +11678,8 @@ window.__initForgeStudioApp = function () {
     } else if (terrainMode === 'paint' && hit.uv) {
       const _isStrokeStart = !strokeSavedTerrain;
       if (!strokeSavedTerrain) {
-        // BUGFIX: this used to call terrainSaveUndo() here, which snapshots vertex HEIGHTS —
-        // ground paint never touches those, so Undo was popping a no-op 'sculpt' entry instead of
-        // reverting the actual canvas pixels. Capture the paint canvas instead, same as every
+        // Ground paint never touches vertex heights, so terrainSaveUndo() (which snapshots those)
+        // would give Undo nothing real to revert. Capture the paint canvas instead, same as every
         // other paint surface (character paint, custom-mesh paint), so it's genuinely undoable.
         const target = currentPaintTarget();
         if (target && target.ctx) _paintStrokeBefore.set('ground', { entry: target, before: target.ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE) });
@@ -13994,11 +14175,9 @@ window.__initForgeStudioApp = function () {
       else if (t === 'water') setTerrainMode('water');
       else if (t === 'material') setTerrainMode('select');
       else if (t === 'blocks') setTerrainMode('select');
-      else if (t === 'object') setTerrainMode('select'); // BUGFIX: this used to fall through to the
-        // 'orbit' default below, so opening the Object tab left tap-to-select never actually turned
-        // on — taps on the map went straight to the orbit camera instead of picking a model, and
-        // you had to notice and tap the small Orbit/Select/Delete-brush switch inside the panel
-        // yourself before clicking on the map would do anything.
+      else if (t === 'object') setTerrainMode('select'); // opening the Object tab should turn on
+        // tap-to-select immediately, not leave taps going to the orbit camera until the user notices
+        // and flips the small Orbit/Select/Delete-brush switch inside the panel themselves.
       else setTerrainMode('orbit');
     };
 
@@ -14237,6 +14416,11 @@ window.__initForgeStudioApp = function () {
     rowInvert.appendChild(bInvert); container.appendChild(rowInvert);
   }
 
+  // ============================================================
+  // TERRAIN DOCK — PER-TOOL TAB BUILDERS. One buildXTab() per bottom-dock tab (Erosion, Sculpt,
+  // Paint, Object, Blocks, Vegetation, Material, Road, Water, Layers, Optimize, Export, Import),
+  // each building that tab's controls fresh into the dock content area when its tab is selected.
+  // ============================================================
   function buildErosionTab() {
     const label = document.createElement('div'); label.className = 'sec-label'; label.textContent = 'Erosion simulation';
     dock.appendChild(label);
@@ -14669,7 +14853,7 @@ window.__initForgeStudioApp = function () {
       const bAdd = document.createElement('button'); bAdd.className = 'btn primary'; bAdd.style.flex = '1'; bAdd.textContent = '+ New layer';
       bAdd.onclick = () => addPaintLayer(paintTarget);
       const bReset = document.createElement('button'); bReset.className = 'btn danger'; bReset.textContent = 'Clear all layers';
-      bReset.onclick = () => { if (confirm('Clear every paint layer on this surface? This cannot be undone.')) clearAllPaintLayers(paintTarget, terrainIsCustom ? '#cfcfd2' : '#5c7a52'); buildTerrainDock(); };
+      bReset.onclick = async () => { if (await customConfirm('Clear every paint layer on this surface? This cannot be undone.', { danger: true })) clearAllPaintLayers(paintTarget, terrainIsCustom ? '#cfcfd2' : '#5c7a52'); buildTerrainDock(); };
       layerActions.appendChild(bAdd); layerActions.appendChild(bReset); dock.appendChild(layerActions);
 
       const noteLayers = document.createElement('p');
@@ -14967,7 +15151,7 @@ window.__initForgeStudioApp = function () {
 
       const actions4 = document.createElement('div'); actions4.className = 'row actions';
       const bDelSel = document.createElement('button'); bDelSel.className = 'btn'; bDelSel.textContent = 'Delete selected';
-      bDelSel.onclick = () => { const ids = sel.map(e => e.id); if (sel.length > 3 && !confirm('Delete ' + sel.length + ' object(s)?')) return; deleteMapObjects(ids, 'delete ' + ids.length + ' selected'); refreshUI(); };
+      bDelSel.onclick = async () => { const ids = sel.map(e => e.id); if (sel.length > 3 && !(await customConfirm('Delete ' + sel.length + ' object(s)?', { danger: true }))) return; deleteMapObjects(ids, 'delete ' + ids.length + ' selected'); refreshUI(); };
       const bDelSim = document.createElement('button'); bDelSim.className = 'btn'; bDelSim.textContent = 'Delete similar';
       bDelSim.onclick = () => deleteSimilar(one);
       actions4.appendChild(bDelSel); actions4.appendChild(bDelSim); dock.appendChild(actions4);
@@ -15531,7 +15715,7 @@ window.__initForgeStudioApp = function () {
       const eyeBtn = document.createElement('button'); eyeBtn.className = 'iconbtn'; eyeBtn.style.cssText = 'width:34px;height:34px;'; eyeBtn.textContent = grassInstanced.mesh.visible ? '👁' : '🚫';
       eyeBtn.onclick = () => { grassInstanced.mesh.visible = !grassInstanced.mesh.visible; buildTerrainDock(); };
       const delBtn = document.createElement('button'); delBtn.className = 'iconbtn'; delBtn.style.cssText = 'width:34px;height:34px;'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (!confirm('Clear all ' + grassInstanced.count + ' grass blade(s)?')) return; clearAllGrass(); buildTerrainDock(); };
+      delBtn.onclick = async () => { if (!(await customConfirm('Clear all ' + grassInstanced.count + ' grass blade(s)?', { danger: true }))) return; clearAllGrass(); buildTerrainDock(); };
       row.appendChild(dot); row.appendChild(label); row.appendChild(eyeBtn); row.appendChild(delBtn);
       dock.appendChild(row);
     }
@@ -15548,7 +15732,7 @@ window.__initForgeStudioApp = function () {
       const lockBtn = document.createElement('button'); lockBtn.className = 'iconbtn'; lockBtn.style.cssText = 'width:34px;height:34px;'; lockBtn.textContent = anyLocked ? '🔒' : '🔓';
       lockBtn.onclick = () => { const newLock = !anyLocked; items.forEach(o => { o.locked = newLock; if (newLock) { const i = selectedIds.indexOf(o.id); if (i >= 0) selectedIds.splice(i, 1); } }); buildTerrainDock(); };
       const delBtn = document.createElement('button'); delBtn.className = 'iconbtn'; delBtn.style.cssText = 'width:34px;height:34px;'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (!confirm('Delete all ' + items.length + ' "' + cat + '" object(s)?')) return; deleteMapObjects(items.map(o => o.id), 'delete layer ' + cat); refreshUI(); };
+      delBtn.onclick = async () => { if (!(await customConfirm('Delete all ' + items.length + ' "' + cat + '" object(s)?', { danger: true }))) return; deleteMapObjects(items.map(o => o.id), 'delete layer ' + cat); refreshUI(); };
       row.appendChild(dot); row.appendChild(label); row.appendChild(eyeBtn); row.appendChild(lockBtn); row.appendChild(delBtn);
       dock.appendChild(row);
     });
@@ -15902,12 +16086,12 @@ window.__initForgeStudioApp = function () {
     // those don't happen inside the same input event that started them and would otherwise miss
     // the pointer/click-based requestRender() triggers.
     requestRender();
-    // FIX: was `paintMeshes.length > 0` — for a "too dense to paint" character (charTooDense),
-    // paintMeshes stays empty on purpose (see loadCharacterObject), so this used to hide the whole
-    // bottom dock — including the "Combine Animations" tab and its Add-animation button — the moment
-    // a heavy model loaded. charRoot !== null is the correct "is a character loaded" check.
-    // PHASE 2: a character workspace with only Character B loaded (no A yet) still counts as
-    // "has content" — otherwise the empty-state overlay would wrongly cover a valid Character B-only session.
+    // charRoot !== null is the correct "is a character loaded" check — paintMeshes stays empty on
+    // purpose for a "too dense to paint" character (charTooDense; see loadCharacterObject), so
+    // checking paintMeshes.length here would wrongly hide the whole bottom dock, including the
+    // "Combine Animations" tab, the moment a heavy model loaded.
+    // A character workspace with only Character B loaded (no A yet) still counts as "has content" —
+    // otherwise the empty-state overlay would wrongly cover a valid Character B-only session.
     const hasContent = (workspace === 'character') ? (charRoot !== null || charRootB !== null) : (terrainRoot !== null);
     // Soft, one-time heads-up as the map's poly count climbs — well before the hard "heavy scene"
     // warning that only appears once you open the Export tab. Lets you back off (fewer vegetation
@@ -16036,10 +16220,9 @@ window.__initForgeStudioApp = function () {
     fileInputTerrainModel.value = '';
   };
   function pickModelFile(fileList) {
-    // BUGFIX: this only matched fbx/glb/gltf, so an .obj (which is often selected together with its
-    // companion .mtl and texture files) fell through to the `|| fileList[0]` fallback — fine if the
-    // .obj happened to be first in the selection, but if the .mtl or a texture sorted first instead,
-    // THAT got treated as "the model" and the actual .obj was silently ignored.
+    // Match .obj too, not just fbx/glb/gltf — an .obj is often selected together with its companion
+    // .mtl and texture files, and without an explicit match here the `|| fileList[0]` fallback could
+    // pick whichever of those sorted first instead of the actual model.
     return Array.from(fileList).find(f => /\.(fbx|glb|gltf|obj)$/i.test(f.name)) || fileList[0];
   }
   fileInputReplace.onchange = (e) => {
@@ -16079,16 +16262,16 @@ window.__initForgeStudioApp = function () {
   document.getElementById('assetLibraryDeleteSelectedBtn').onclick = () => deleteSelectedLibraryAssets();
   document.getElementById('assetLibrarySelectCancelBtn').onclick = () => setLibrarySelecting(false);
   document.getElementById('btn-projects').onclick = () => openProjectsModal();
-  document.getElementById('projectsSaveBtn').onclick = () => {
+  document.getElementById('projectsSaveBtn').onclick = async () => {
     if (!currentProjectName || currentProjectName === 'Untitled project') {
-      const nn = prompt('Name this project', 'My project');
+      const nn = await customPrompt('Choose a name for this project.', 'My project', { title: 'Name this project' });
       if (nn && nn.trim()) currentProjectName = nn.trim();
     }
     saveCurrentProject(() => { if (projectsModal.classList.contains('show')) openProjectsModal(); });
   };
-  document.getElementById('projectsNewBtn').onclick = () => {
+  document.getElementById('projectsNewBtn').onclick = async () => {
     if (terrainRoot || charRoot) {
-      if (!confirm('Start a new project? Anything not saved will be lost — use "Save current" first if you want to keep it.')) return;
+      if (!(await customConfirm('Anything not saved will be lost — use "Save current" first if you want to keep it.', { title: 'Start a new project?', danger: true }))) return;
     }
     closeProjectsModal();
     startNewProject();
@@ -16116,13 +16299,23 @@ window.__initForgeStudioApp = function () {
   // Home for the editor (see hideHomeScreen above) rather than at page load, so it never competes
   // with Home for the screen. Never shows again once dismissed unless "Don't show again" is
   // unchecked — which lets a curious returning user re-open it (via the same flag path, or the
-  // Settings → Replay button) without needing a dedicated menu entry, though the checkbox defaults
-  // ON so the common case is "see once, gone".
+  // Settings → Replay button) without needing a dedicated menu entry. The checkbox now defaults
+  // OFF (opt-in, not opt-out) so onboarding reappears for anyone who dismisses without deciding.
   // ============================================================
   const ONBOARDING_SEEN_KEY = 'forgeOnboardingSeenV1';
   const onboardingOverlay = document.getElementById('onboardingOverlay');
-  const onboardingGotIt = document.getElementById('onboardingGotIt');
   const onboardingDontShowCheck = document.getElementById('onboardingDontShowCheck');
+  const onboardingStepEls = Array.from(document.querySelectorAll('#onboardingSteps .onboard-step'));
+  const onboardingDotEls = Array.from(document.querySelectorAll('#onboardingDots .dot'));
+  const onboardingNext = document.getElementById('onboardingNext');
+  const onboardingBack = document.getElementById('onboardingBack');
+  let onboardingStep = 0;
+  function renderOnboardingStep() {
+    onboardingStepEls.forEach((el, i) => el.classList.toggle('active', i === onboardingStep));
+    onboardingDotEls.forEach((el, i) => el.classList.toggle('active', i === onboardingStep));
+    onboardingBack.hidden = onboardingStep === 0;
+    onboardingNext.textContent = onboardingStep === onboardingStepEls.length - 1 ? 'Got it' : 'Next';
+  }
   function dismissOnboarding() {
     onboardingOverlay.classList.remove('show');
     try {
@@ -16130,9 +16323,20 @@ window.__initForgeStudioApp = function () {
       else localStorage.removeItem(ONBOARDING_SEEN_KEY);
     } catch (e) { /* storage unavailable — just don't persist, still dismiss for this session */ }
   }
-  onboardingGotIt.onclick = dismissOnboarding;
+  onboardingNext.onclick = () => {
+    if (onboardingStep >= onboardingStepEls.length - 1) { dismissOnboarding(); return; }
+    onboardingStep++;
+    renderOnboardingStep();
+  };
+  onboardingBack.onclick = () => {
+    if (onboardingStep <= 0) return;
+    onboardingStep--;
+    renderOnboardingStep();
+  };
   onboardingOverlay.addEventListener('click', (e) => { if (e.target === onboardingOverlay) dismissOnboarding(); });
   function maybeShowOnboarding() {
+    onboardingStep = 0;
+    renderOnboardingStep();
     try {
       if (!localStorage.getItem(ONBOARDING_SEEN_KEY)) onboardingOverlay.classList.add('show');
     } catch (e) {
