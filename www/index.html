@@ -4,6 +4,50 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Forge Studio — Character &amp; Terrain</title>
+<!-- TEMP DIAGNOSTIC — on-screen crash reporter. If startup JS throws anywhere (vendor script, the
+     main app init function, anything), the person was left staring at a dead placeholder screen
+     with zero indication why. This catches EVERY uncaught error/rejection from the very first
+     script onward and shows the real message + stack right on screen, so it can be screenshotted
+     and sent back instead of guessing blind. Placed as the very first thing in <head> so nothing
+     can throw before this listener exists. Safe to remove (search "TEMP DIAGNOSTIC") once startup
+     is confirmed reliable. -->
+<script>
+(function () {
+  const pending = [];
+  function render(text) {
+    let box = document.getElementById('js-fatal-error-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'js-fatal-error-box';
+      box.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:999999;background:#2a0a0a;color:#ffb4b4;font:11px/1.4 monospace;padding:10px 30px 10px 10px;border-radius:8px;max-height:70vh;overflow-y:auto;white-space:pre-wrap;box-shadow:0 2px 10px rgba(0,0,0,0.6);border:1px solid #ff6b6b;';
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:none;color:#ffb4b4;font-size:16px;line-height:1;cursor:pointer;padding:4px 6px;';
+      closeBtn.onclick = function () { box.remove(); };
+      box.appendChild(closeBtn);
+      document.body.appendChild(box);
+    }
+    const line = document.createElement('div');
+    line.style.cssText = 'margin-bottom:6px;border-bottom:1px solid #502020;padding-bottom:6px;';
+    line.textContent = text;
+    box.appendChild(line);
+  }
+  function showFatalJSError(text) {
+    if (!document.body) { pending.push(text); return; }
+    render(text);
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    while (pending.length) render(pending.shift());
+  });
+  window.addEventListener('error', function (e) {
+    showFatalJSError('JS error: ' + e.message + '\n@ ' + (e.filename || '?') + ':' + (e.lineno || '?') + ':' + (e.colno || '?') + (e.error && e.error.stack ? '\n' + e.error.stack : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    const r = e.reason;
+    showFatalJSError('Unhandled promise rejection: ' + (r && (r.stack || r.message) || String(r)));
+  });
+})();
+</script>
 <!-- PWA: makes this installable to the home screen as a standalone app (own icon, no browser
      address bar, works offline after first launch). Requires index.html, manifest.json, sw.js and
      the icon-*.png files to all be hosted together in the same folder — see PWA_APK_GUIDE.md. -->
