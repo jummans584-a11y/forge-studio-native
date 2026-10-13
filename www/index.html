@@ -1610,13 +1610,22 @@
 <script src="./vendor/BufferGeometryUtils.js"></script>
 <script src="./vendor/SimplifyModifier.js"></script>
 <script>
-  // Hand off to the main app the instant it's defined (next <script> block) — mirrors exactly what
-  // the browser bootstrap's whenMainScriptReady()+hand-off did, just without any of the network/
-  // cache machinery, since local files are already guaranteed loaded by this point.
-  window.__forgeAppStarted = true;
-  window.__initForgeStudioApp();
-  const __loadingEl = document.getElementById('loading');
-  if (__loadingEl) __loadingEl.classList.remove('show');
+  // BUGFIX: this used to call window.__initForgeStudioApp() immediately, right here — but that
+  // function isn't DEFINED until a later <script> block further down the page (it was always meant
+  // to be called only once that later script had already run, same as the browser bootstrap's own
+  // whenMainScriptReady() wait). Calling it immediately here threw "window.__initForgeStudioApp is
+  // not a function", which crashed startup before the home screen / empty-state ever got populated
+  // — exactly the blank "Texture Painter" placeholder with no buttons seen on first launch.
+  // Fix: wait for the window 'load' event, which only fires after every synchronous script on the
+  // page (including the one defining __initForgeStudioApp, wherever it sits) has already run — so by
+  // then the function is guaranteed to exist, regardless of exact script order below.
+  window.addEventListener('load', function () {
+    if (window.__forgeAppStarted) return;
+    window.__forgeAppStarted = true;
+    window.__initForgeStudioApp();
+    const __loadingEl = document.getElementById('loading');
+    if (__loadingEl) __loadingEl.classList.remove('show');
+  });
 </script>
 <script>
 window.__initForgeStudioApp = function () {
