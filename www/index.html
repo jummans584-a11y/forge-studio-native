@@ -33,6 +33,8 @@
     box.appendChild(line);
   }
   function showFatalJSError(text) {
+    // <body> doesn't exist yet if the error happens while still parsing <head> — queue it and flush
+    // once the DOM is ready instead of dropping it.
     if (!document.body) { pending.push(text); return; }
     render(text);
   }
@@ -1594,10 +1596,7 @@
 <!-- APK/native build: plain local vendor <script> tags instead of the browser version's
      multi-CDN fallback+cache bootstrap. The APK bundles these files directly (downloaded into
      ./vendor/ at build time by the GitHub Actions workflow) so the app needs zero network access to
-     start, loads instantly, and never shows a download/progress screen on launch. Script tags run
-     synchronously in order, so by the time the inline script right after this block runs, THREE and
-     every loader/exporter below are guaranteed to already be defined — no polling or promises needed,
-     unlike the browser bootstrap this replaces. -->
+     start, loads instantly, and never shows a download/progress screen on launch. -->
 <script src="./vendor/three.min.js"></script>
 <script src="./vendor/OrbitControls.js"></script>
 <script src="./vendor/TransformControls.js"></script>
@@ -1610,15 +1609,6 @@
 <script src="./vendor/BufferGeometryUtils.js"></script>
 <script src="./vendor/SimplifyModifier.js"></script>
 <script>
-  // BUGFIX: this used to call window.__initForgeStudioApp() immediately, right here — but that
-  // function isn't DEFINED until a later <script> block further down the page (it was always meant
-  // to be called only once that later script had already run, same as the browser bootstrap's own
-  // whenMainScriptReady() wait). Calling it immediately here threw "window.__initForgeStudioApp is
-  // not a function", which crashed startup before the home screen / empty-state ever got populated
-  // — exactly the blank "Texture Painter" placeholder with no buttons seen on first launch.
-  // Fix: wait for the window 'load' event, which only fires after every synchronous script on the
-  // page (including the one defining __initForgeStudioApp, wherever it sits) has already run — so by
-  // then the function is guaranteed to exist, regardless of exact script order below.
   window.addEventListener('load', function () {
     if (window.__forgeAppStarted) return;
     window.__forgeAppStarted = true;
@@ -6990,6 +6980,35 @@ window.__initForgeStudioApp = function () {
   // ============================================================
   const vxClean = (k, v) => k[0] === '_' ? undefined : v;
   const vxDl = (data, type, name) => downloadDataUrl(URL.createObjectURL(new Blob([data], { type })), name);
+
+  // Small reusable progress bar for anything that processes a zip's files one by one (import scan,
+  // export build) — up to now these ran with zero visible feedback, so a bigger library just looked
+  // frozen with no way to tell how far along it was. vxProgress(label) shows it; .set(done, total)
+  // updates the bar + "X / Y" count; .done() fades it out.
+  function vxProgress(label) {
+    let box = document.getElementById('vxProgressBox');
+    if (box) box.remove();
+    box = document.createElement('div');
+    box.id = 'vxProgressBox';
+    box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:86px;z-index:999998;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--ink);font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.4);transition:opacity .25s';
+    box.innerHTML = '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b id="vxProgressLabel"></b><span id="vxProgressCount" style="color:var(--ink-dim)"></span></div><div style="height:7px;border-radius:5px;background:var(--panel-2);overflow:hidden"><div id="vxProgressFill" style="height:100%;width:0%;background:var(--accent);transition:width .12s"></div></div>';
+    document.body.appendChild(box);
+    document.getElementById('vxProgressLabel').textContent = label;
+    return {
+      set(done, total) {
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const fill = document.getElementById('vxProgressFill'), cnt = document.getElementById('vxProgressCount');
+        if (fill) fill.style.width = pct + '%';
+        if (cnt) cnt.textContent = done + ' / ' + total;
+      },
+      done() {
+        const b = document.getElementById('vxProgressBox');
+        if (!b) return;
+        b.style.opacity = '0';
+        setTimeout(() => { if (b.parentNode) b.remove(); }, 260);
+      },
+    };
+  }
   const vxC = (h, a) => { const c = new THREE.Color(h); return 'Color(' + c.r.toFixed(3) + ',' + c.g.toFixed(3) + ',' + c.b.toFixed(3) + ',' + (a == null ? 1 : a) + ')'; };
   const vxN = x => +(+x).toFixed(4);
   const vxF = (h, a) => { const c = new THREE.Color(h); return [c.r, c.g, c.b, a].map(x => +x.toFixed(3)).join(', '); };
@@ -7093,16 +7112,25 @@ window.__initForgeStudioApp = function () {
   }
   async function vxEntData(en) { if (en.dir) return new Uint8Array(0); if (en._u) return en._u; const b = en.meth === 0 ? en.comp : en.meth === 8 ? await vxInflate(en.comp) : null; if (!b) throw new Error('zip compression type support nahi (' + en.meth + ')'); return b; }
   async function vxEntText(en) { return new TextDecoder('utf-8').decode(await vxEntData(en)); }
-  async function vxZipBuild() {
+  async function vxZipBuild(showProgress) {
     const te = new TextEncoder(), parts = [], cd = []; let off = 0; const push = b => { parts.push(b); off += b.length; };
-    for (const en of VXL.ents) {
+    const prog = (showProgress && VXL.ents.length > 3) ? vxProgress('Building ZIP…') : null;
+    for (let i = 0; i < VXL.ents.length; i++) {
+      const en = VXL.ents[i];
       const nm = te.encode(en.name), lo = off, h = new DataView(new ArrayBuffer(30));
       h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, en.meth, true); h.setUint16(10, en.tm, true); h.setUint16(12, en.dt, true); h.setUint32(14, en.crc, true); h.setUint32(18, en.comp.length, true); h.setUint32(22, en.usize, true); h.setUint16(26, nm.length, true);
       push(new Uint8Array(h.buffer)); push(nm); push(en.comp);
       const c = new DataView(new ArrayBuffer(46));
       c.setUint32(0, 0x02014b50, true); c.setUint16(4, en.vm || 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, en.meth, true); c.setUint16(12, en.tm, true); c.setUint16(14, en.dt, true); c.setUint32(16, en.crc, true); c.setUint32(20, en.comp.length, true); c.setUint32(24, en.usize, true); c.setUint16(28, nm.length, true); c.setUint32(38, en.ea >>> 0, true); c.setUint32(42, lo, true);
       cd.push(new Uint8Array(c.buffer), nm);
+      if (prog) {
+        prog.set(i + 1, VXL.ents.length);
+        // Yield to the browser every so often so the bar actually animates on screen instead of the
+        // whole (synchronous) loop finishing before a single frame gets to paint.
+        if (i % 20 === 19) await new Promise(r => setTimeout(r, 0));
+      }
     }
+    if (prog) prog.done();
     const cdo = off; cd.forEach(push); const e = new DataView(new ArrayBuffer(22));
     e.setUint32(0, 0x06054b50, true); e.setUint16(8, VXL.ents.length, true); e.setUint16(10, VXL.ents.length, true); e.setUint32(12, off - cdo, true); e.setUint32(16, cdo, true); push(new Uint8Array(e.buffer));
     return new Blob(parts, { type: 'application/zip' });
@@ -7111,7 +7139,7 @@ window.__initForgeStudioApp = function () {
   async function vxLibPersist() {
     try { if (!VXL.ents.length) { await vxIdb('readwrite', s => s.delete('lib')); return; } const ab = await (await vxZipBuild()).arrayBuffer(); await vxIdb('readwrite', s => s.put({ name: VXL.name, buf: ab }, 'lib')); } catch (e) { console.warn('[vfx lib]', e); }
   }
-  (async () => { try { const r = await vxIdb('readonly', s => s.get('lib')); if (r && r.buf) { VXL.ents = vxZipParse(r.buf); VXL.name = r.name || 'Forge_VFX_Library.zip'; } } catch (e) {} })();
+  (async () => { try { const r = await vxIdb('readonly', s => s.get('lib')); if (r && r.buf) { VXL.ents = vxZipParse(r.buf); VXL.name = r.name || 'Forge_VFX_Library.zip'; vxScanLibraryVfx(); } } catch (e) {} })();
   const vxDos = () => { const d = new Date(); return { tm: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dt: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate() }; };
   async function vxLibPut(name, text) { // create or overwrite one file (missing parent folders are created too)
     const b = new TextEncoder().encode(text), z = await vxDeflate(b), use = z && z.length < b.length;
@@ -7123,12 +7151,61 @@ window.__initForgeStudioApp = function () {
     } else { const t = vxDos(); en.tm = t.tm; en.dt = t.dt; }
     en.comp = use ? z : b; en.meth = use ? 8 : 0; en.crc = vxCrc(b); en.usize = b.length; delete en._u; return en;
   }
+  // BUGFIX (zip import "VFX nahi banta, sirf export hota hai"): two problems compounded. (1) only
+  // files literally named "*.vfx.json" were ever treated as loadable — a zip whose effect file was
+  // named plain "*.json" (or anything else) had NOTHING tappable in the whole list, so the only
+  // button that visibly did anything was Export, which just echoes the same zip straight back out —
+  // exactly the reported symptom. (2) even for a correctly-named file, importing only ever populated
+  // the browsable list — it never actually loaded/built an effect into the editor on its own, so
+  // "import" alone never produced a visible VFX; a person would have to already know to dig in and
+  // tap the right file afterwards. Fixed by detecting any real Forge VFX file by its ACTUAL content
+  // (format:"forge-vfx" inside the JSON), not just its filename, and by auto-loading it immediately
+  // when a freshly-imported zip turns out to contain exactly one.
+  async function vxIsForgeVfx(en) {
+    if (en.dir || !/\.json$/i.test(en.name)) return false;
+    try { const d = JSON.parse(await vxEntText(en)); return !!(d && d.format === 'forge-vfx'); } catch (e) { return false; }
+  }
+  // Tags every .json entry in the current library with en._isVfx (true/false) based on actual file
+  // content, then re-renders the sheet if it's open — so renaming/mis-extensioned VFX files still
+  // show up as tappable, not just ones ending in exactly ".vfx.json". Runs in the background after
+  // import and after restoring a persisted library on app start, since it needs to decompress and
+  // JSON.parse every candidate file (fine for normal library sizes, not something to do per render).
+  let vxScanToken = 0;
+  async function vxScanLibraryVfx() {
+    const myToken = ++vxScanToken;
+    const candidates = VXL.ents.filter(e => !e.dir && /\.json$/i.test(e.name) && e._isVfx === undefined);
+    for (const en of candidates) {
+      if (myToken !== vxScanToken) return; // library changed again mid-scan — bail, a newer scan owns this now
+      en._isVfx = await vxIsForgeVfx(en);
+    }
+    if (myToken === vxScanToken && document.getElementById('vxLib')) vxLibSheet();
+  }
   async function vxZipImport(buf, name) {
     try {
       const ents = vxZipParse(buf); if (!ents.length) throw new Error('zip khaali hai');
       VXL.name = name || 'Forge_VFX_Library.zip'; VXL.ents = ents; VXL.cur = ''; VXL.open = {};
-      const nj = ents.filter(e => /\.vfx\.json$/i.test(e.name)).length, nf = ents.filter(e => !e.dir).length, nd = ents.filter(e => e.dir).length;
-      vxLibPersist(); toast('ZIP import ✓ — ' + nj + ' VFX, ' + nf + ' files, ' + nd + ' folders (structure same)', 3200); vxLibSheet();
+      const jsonCandidates = ents.filter(e => !e.dir && /\.json$/i.test(e.name));
+      const vfxHits = [];
+      const prog = jsonCandidates.length > 3 ? vxProgress('Scanning ' + name + '…') : null;
+      for (let i = 0; i < jsonCandidates.length; i++) {
+        const en = jsonCandidates[i];
+        en._isVfx = await vxIsForgeVfx(en); if (en._isVfx) vfxHits.push(en);
+        if (prog) prog.set(i + 1, jsonCandidates.length);
+      }
+      if (prog) prog.done();
+      const nf = ents.filter(e => !e.dir).length, nd = ents.filter(e => e.dir).length;
+      vxLibPersist();
+      if (vfxHits.length === 1) {
+        // Exactly one real VFX in the zip — load it straight into the editor now, no extra tap needed.
+        toast('ZIP import ✓ — ' + vfxHits[0].name.split('/').pop() + ' khul raha hai (' + nf + ' files, ' + nd + ' folders)', 3200);
+        await vxLibLoad(vfxHits[0]);
+      } else if (vfxHits.length > 1) {
+        toast('ZIP import ✓ — ' + vfxHits.length + ' VFX mile, ' + nf + ' files, ' + nd + ' folders. List mein se ek chuno.', 3600);
+        vxLibSheet();
+      } else {
+        toast('ZIP import ✓ ho gaya (' + nf + ' files, ' + nd + ' folders), lekin isme koi Forge VFX (.vfx.json) file nahi mili — sirf raw files hain, ye khulengi nahi.', 4200);
+        vxLibSheet();
+      }
     } catch (e) { toast('ZIP padh nahi paya: ' + e.message, 3600); }
   }
   async function vxLibLoad(en, sh) {
@@ -7145,7 +7222,7 @@ window.__initForgeStudioApp = function () {
   }
   async function vxLibExport() {
     if (!VXL.ents.length) { toast('Library khaali hai — pehle ZIP import karo', 2600); return; }
-    try { vxDl(await vxZipBuild(), 'application/zip', VXL.name || 'Forge_VFX_Library.zip'); } catch (e) { toast('ZIP export fail: ' + e.message, 3200); }
+    try { vxDl(await vxZipBuild(true), 'application/zip', VXL.name || 'Forge_VFX_Library.zip'); } catch (e) { toast('ZIP export fail: ' + e.message, 3200); }
   }
   async function vxLibView(en) {
     try {
@@ -7165,7 +7242,7 @@ window.__initForgeStudioApp = function () {
     const sbtn = (t, fn, hl) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'padding:9px 11px;border-radius:11px;border:1px solid ' + (hl ? 'var(--accent)' : 'var(--line)') + ';background:var(--panel-2);color:var(--ink);font-size:12px'; b.onclick = fn; return b; };
     hd.appendChild(sbtn('✕', () => sh.remove()));
     const body = document.createElement('div'); body.style.cssText = 'flex:1;overflow:auto;padding:10px 12px 28px';
-    const nj = VXL.ents.filter(e => /\.vfx\.json$/i.test(e.name)).length, nf = VXL.ents.filter(e => !e.dir).length, nd = VXL.ents.filter(e => e.dir).length;
+    const nj = VXL.ents.filter(e => e._isVfx === true || (e._isVfx !== false && /\.vfx\.json$/i.test(e.name))).length, nf = VXL.ents.filter(e => !e.dir).length, nd = VXL.ents.filter(e => e.dir).length;
     const info = document.createElement('div'); info.style.cssText = 'color:var(--ink-dim);margin-bottom:8px';
     info.textContent = VXL.ents.length ? VXL.name + ' · ' + nj + ' VFX · ' + nf + ' files · ' + nd + ' folders' + (VXL.cur ? ' · khula: ' + VXL.cur.split('/').pop() : '') : 'Abhi koi library nahi. 📥 se ZIP chuno — saare folders/files bilkul waise hi ban jaayenge, aur Export par wahi structure wapas ZIP ban kar nikalega.';
     const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px';
@@ -7188,7 +7265,11 @@ window.__initForgeStudioApp = function () {
         const inner = document.createElement('div'); inner.style.cssText = 'padding-left:10px'; render(c, inner, depth + 1); dt.appendChild(inner); host.appendChild(dt);
       });
       n.f.sort((a, b) => nat(a.b, b.b)).forEach(({ en, b }) => {
-        const r = document.createElement('div'), isV = /\.vfx\.json$/i.test(b), isT = /\.(txt|md|json)$/i.test(b); r.style.cssText = 'display:flex;gap:6px;align-items:center;margin:3px 0';
+        // en._isVfx is set by vxScanLibraryVfx() from the file's actual content (format:"forge-vfx"),
+        // not just its name — so a Forge VFX file saved as plain "*.json" is still recognized and
+        // tappable, same as one properly named "*.vfx.json". Falls back to the name-only check only
+        // for the brief moment before the background content scan (see vxScanLibraryVfx) finishes.
+        const r = document.createElement('div'), isV = en._isVfx === true || (en._isVfx !== false && /\.vfx\.json$/i.test(b)), isT = /\.(txt|md|json)$/i.test(b); r.style.cssText = 'display:flex;gap:6px;align-items:center;margin:3px 0';
         const bt = document.createElement('button'); bt.style.cssText = 'flex:1;min-width:0;text-align:left;padding:8px 10px;border-radius:10px;border:1px solid ' + (VXL.cur === en.name ? 'var(--accent)' : 'var(--line)') + ';background:var(--panel-2);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
         bt.textContent = (isV ? '✨ ' : '📄 ') + b + ' · ' + (en.usize / 1024).toFixed(1) + ' KB';
         bt.onclick = isV ? () => vxLibLoad(en, sh) : isT ? () => vxLibView(en) : () => toast('Ye file export ZIP mein saath jaayegi (yahan khulti nahi)', 2600);
@@ -30170,11 +30251,6 @@ var FA_CORE = (function (THREE) {
   // screen" / "Install app") and works offline after the first successful load. This silently does
   // nothing if the file is opened directly (file://) or from a host without HTTPS, since service
   // workers require a real http(s) origin — that's expected, not a bug; see PWA_APK_GUIDE.md.
-  // APK build: also skip entirely when running as the packaged native app — Capacitor serves pages
-  // from https://localhost too, so the browser check below would otherwise try to register one here
-  // as well, for no reason (there's no PWA install prompt inside a native WebView, and no sw.js is
-  // bundled in this build to register in the first place — it'd just be a pointless failed fetch on
-  // every launch).
   const __isNativeApp = window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform();
   if (!__isNativeApp && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     window.addEventListener('load', () => {
