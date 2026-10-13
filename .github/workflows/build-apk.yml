@@ -31,8 +31,14 @@ jobs:
           mkdir -p ~/.android
           echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # BUGFIX: android-actions/setup-android@v3 started failing build-wide ("Failed to find package
+      # 'tools'" / sdkmanager exit code 1) because it tries to install a legacy "tools" package that
+      # Google has removed from the SDK repository — this broke every build, unrelated to anything in
+      # this project. GitHub's own ubuntu-latest runner already ships a full Android SDK (with
+      # ANDROID_HOME preconfigured), so the dedicated setup action isn't needed at all — this step
+      # just makes sure its licenses are accepted, which is the only part of SDK setup Gradle needs.
+      - name: Accept Android SDK licenses (SDK itself is preinstalled on ubuntu-latest)
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Download 3D engine files (bundled into the app, so it works fully offline)
         run: |
