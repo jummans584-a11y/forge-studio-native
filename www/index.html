@@ -1594,9 +1594,7 @@
 </div>
 
 <!-- APK/native build: plain local vendor <script> tags instead of the browser version's
-     multi-CDN fallback+cache bootstrap. The APK bundles these files directly (downloaded into
-     ./vendor/ at build time by the GitHub Actions workflow) so the app needs zero network access to
-     start, loads instantly, and never shows a download/progress screen on launch. -->
+     multi-CDN fallback+cache bootstrap. -->
 <script src="./vendor/three.min.js"></script>
 <script src="./vendor/OrbitControls.js"></script>
 <script src="./vendor/TransformControls.js"></script>
@@ -11747,6 +11745,14 @@ window.__initForgeStudioApp = function () {
     const startPct = parseFloat(loadingBarFill.style.width) || 0;
     const sizeMB = (buffer && buffer.byteLength ? buffer.byteLength : 5e6) / 1e6;
     startFakeProgress(startPct, 92, Math.min(6000, Math.max(500, sizeMB * 150)));
+    // BUGFIX (heavy models "hang" on import): FBXLoader/GLTFLoader's actual .parse() call below is one
+    // single synchronous call with no progress events of its own — for a big multi-mesh file (hundreds
+    // of thousands of verts) this can genuinely take several real seconds, during which the main
+    // thread is 100% busy: no repaints, no touch response, the fake progress bar above even freezes
+    // mid-tick. There was no way to tell that from "stuck" vs "still working", so a heavy import felt
+    // exactly like a crash. This can't be made instant (that work genuinely has to happen somewhere),
+    // but at least setting honest expectations up front means a real wait doesn't look like a freeze.
+    if (sizeMB > 15) loadingText.textContent = 'Parsing a large model (' + sizeMB.toFixed(0) + ' MB)… this can take up to a minute, and the screen may stop responding for a bit while it works — that\'s normal, please don\'t close the app.';
     const finish = (obj) => { fiFinalizeImport(obj, ext, () => { stopFakeProgress(); setLoadingProgress(100); onDone(obj); }); };
     const fail = (err) => { stopFakeProgress(); onError(err); };
     ensureModelLoaderReady(ext).then(() => fiPrepareLoaders(ext, buffer, manager)).then(() => {
@@ -23600,7 +23606,12 @@ var FA_CORE = (function (THREE) {
       }, 40);
     }
     function doAnalyze() {
-      showLoading('Analysing body…');
+      let _nv = 0; charRoot.traverse(o => { if (o.isMesh && o.geometry && o.geometry.attributes.position) _nv += o.geometry.attributes.position.count; });
+      // Same honest-expectations fix as the model-import loading screen: C.gatherMeshData below reads
+      // every vertex of every mesh synchronously, so a heavy multi-mesh character (hundreds of
+      // thousands of verts) can genuinely freeze the screen for several real seconds here — without
+      // this message that looked identical to AutoRig just being broken/stuck on a dense character.
+      showLoading(_nv > 150000 ? 'Analysing a dense body (' + _nv.toLocaleString() + ' verts)… can take a while, screen may briefly stop responding — that\'s normal.' : 'Analysing body…');
       setTimeout(() => {
         try {
           st.datas = C.gatherMeshData(charRoot);
