@@ -20030,6 +20030,27 @@ var FA_CORE = (function (THREE) {
       const mw = wRow[neckI][1]; let k = neckI; while (k + 1 < wRow.length && wRow[k + 1][1] > 0 && wRow[k + 1][1] <= mw * 1.15 + 1) k++; neckI = Math.min(k, neckI + Math.floor(0.05 * H / cell));
     }
     let neckMinY = yOfRow(wRow[neckI][0]);
+    // NECK SANITY CHECK: long hair that falls over the chest, or A-pose arms that make the shoulders look like part of the head,
+    // used to fool the valley search (neck found at the waist -> shoulders, arms, hips and spine all dragged down).
+    // A normal-width head can never be taller than ~27% of the body, so when the result is implausible the neck is re-found
+    // from the first row below the head where the silhouette suddenly becomes much wider than the head (= shoulder / arm line).
+    {
+      let headW0 = 0;
+      for (let i = 0; i < wRow.length; i++) { const y = yOfRow(wRow[i][0]); if (y < maxY - 0.10 * H) break; if (wRow[i][1] > headW0) headW0 = wRow[i][1]; }
+      const hf0 = (maxY - neckMinY) / H, hwFrac = headW0 * cell / H;
+      if (hwFrac < 0.19 && (hf0 > 0.27 || hf0 < 0.075)) {
+        let found = -1;
+        [[1.9, 0.20], [1.55, 0.17]].forEach(([k, floor]) => {
+          if (found >= 0) return;
+          const lim = Math.max(k * headW0, floor * H / cell);
+          for (let i = 0; i < wRow.length; i++) {
+            const y = yOfRow(wRow[i][0]); if (y > maxY - 0.09 * H) continue; if (y < maxY - 0.30 * H) break;
+            if (wRow[i][1] >= lim) { found = i; break; }
+          }
+        });
+        neckMinY = found >= 0 ? yOfRow(wRow[found][0]) + 0.02 * H : maxY - 0.16 * H;
+      }
+    }
     const headFrac = (maxY - neckMinY) / H;                 // realistic ~0.13, toon ~0.2, chibi ~0.33
     const stylised = Math.max(0, headFrac - 0.15);
 
