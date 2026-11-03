@@ -186,6 +186,34 @@
      the screen. */
   #topbar-tools { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex-shrink: 1; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding: 2px 1px; }
   #topbar-tools .iconbtn { scroll-snap-align: end; }
+
+  /* ===== TOP BAR v2 — Undo / Redo / Menu only. Every other action lives in the labelled Quick Menu sheet
+     (nothing is hidden behind a horizontal scroll any more). The original buttons stay in the DOM (hidden)
+     so all existing handlers / active states keep working; the sheet just clicks them. ===== */
+  #topbar-tools { overflow: visible; gap: 6px; }
+  #topbar-tools .iconbtn:not(#btn-undo):not(#btn-redo):not(#btn-menu) { display: none; }
+  #btn-menu { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-2); }
+  #btn-menu svg { display: block; }
+  @media (max-width: 480px) { #workspace-tabs button:not(.active) .wl { display: none; } #workspace-tabs button:not(.active) { padding: 6px 11px; } }
+  #qa-ov { position: fixed; inset: 0; z-index: 100002; display: none; align-items: flex-end; justify-content: center; background: rgba(5,7,15,0.6); }
+  #qa-ov.open { display: flex; }
+  #qa-sheet { width: min(560px, 100%); max-height: 86vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-bottom: none; border-radius: 22px 22px 0 0; padding: 8px 14px calc(18px + env(safe-area-inset-bottom, 0px)); animation: qaUp 0.18s ease-out; font-family: var(--font-display); }
+  @keyframes qaUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+  #qa-grab { width: 40px; height: 4px; border-radius: 3px; background: var(--line); margin: 2px auto 12px; }
+  .qa-title { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 6px; color: var(--ink); font-size: 15px; font-weight: 700; }
+  .qa-title button { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-dim); font-size: 14px; cursor: pointer; }
+  .qa-sec { margin: 14px 2px 8px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-dim); }
+  .qa-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .qa-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 76px; padding: 10px 4px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-size: 11.5px; font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background 0.12s ease, border-color 0.12s ease, transform 0.1s ease; }
+  .qa-tile svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; color: var(--accent-2); }
+  .qa-tile:active { transform: scale(0.96); background: var(--accent-dim); border-color: var(--accent); }
+  .qa-tile.on { border-color: var(--accent); background: var(--accent-dim); }
+  .qa-tile.hero { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 56px; padding: 10px 14px; font-size: 13px; background: linear-gradient(135deg, #4a5bff, #8e5bff); border-color: transparent; color: #fff; }
+  .qa-tile.hero svg { color: #fff; }
+  .qa-tile.hero span { text-align: left; }
+  .qa-tile.hero small { display: block; font-weight: 500; font-size: 10.5px; opacity: 0.85; }
+  /* quick-bar (chips under the top bar): fade the right edge so it is obvious it scrolls, and leave room for the last chip */
+  #th-bar { padding-right: 34px !important; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 30px), transparent); }
   /* On narrow phone screens the "📁 Untitled project" name label was eating space the undo/redo/
      other icon buttons needed, forcing them to crowd or scroll. The project name is still visible
      inside the Projects (📁) panel, so hiding just this label here on small screens costs nothing
@@ -1487,9 +1515,9 @@
 
   <div id="topbar" style="display:none;">
     <div id="workspace-tabs">
-      <button class="active" data-ws="character">🧍 Character</button>
-      <button data-ws="terrain">⛰ Map / Terrain</button>
-      <button data-ws="vfx">✨ VFX</button>
+      <button class="active" data-ws="character" title="Character">🧍<span class="wl"> Character</span></button>
+      <button data-ws="terrain" title="Map / Terrain">⛰<span class="wl"> Map / Terrain</span></button>
+      <button data-ws="vfx" title="VFX">✨<span class="wl"> VFX</span></button>
     </div>
     <div class="title" id="model-name-wrap" style="display:none;">· <b id="model-name">—</b></div>
     <div class="title" id="project-name-wrap" style="min-width:0;max-width:120px;">📁 <b id="project-name">Untitled project</b></div>
@@ -1498,6 +1526,7 @@
     <div id="topbar-tools">
       <button class="iconbtn" id="btn-undo" title="Undo — works across every tool (sculpt, paint, objects, vegetation…)">↶</button>
       <button class="iconbtn" id="btn-redo" title="Redo — works across every tool (sculpt, paint, objects, vegetation…)">↷</button>
+      <button class="iconbtn" id="btn-menu" type="button" title="Menu — saare tools" aria-label="Menu"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
       <button class="iconbtn" id="btn-orbit-override" title="Orbit override — move the camera without leaving your current tool">🧭</button>
       <button class="iconbtn" id="btn-projects" title="Projects — save / load / new">📁</button>
       <button class="iconbtn" id="btn-asset-library" title="Asset Library — your saved models">📚</button>
@@ -37386,6 +37415,61 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       admobDebugToast('exception — ' + e.message);
     }
   });
+</script>
+<script>
+/* Quick Menu sheet — labelled, grouped access to every top-bar action (replaces the hidden horizontal scroll). */
+(function () {
+  var I = {
+    hub: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+    folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+    contrast: '<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>',
+    box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+    camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+    maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+    palette: '<circle cx="13.5" cy="6.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><circle cx="8.5" cy="7.5" r=".6"/><circle cx="6.5" cy="12.5" r=".6"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/>'
+  };
+  var GROUPS = [
+    ['Tools', [['btn-toolhub', 'Tool Hub', 'hub', 'Saare tools ek jagah — search + pin']]],
+    ['View', [['btn-orbit-override', 'Orbit', 'compass'], ['btn-reset-view', 'Reset view', 'maximize'], ['btn-wireframe', 'Wireframe', 'box'], ['btn-lighting', 'Lighting', 'sun'], ['btn-exposure', 'Brightness', 'contrast']]],
+    ['Project', [['btn-projects', 'Projects', 'folder'], ['btn-asset-library', 'Library', 'library'], ['btn-snapshot', 'Snapshot', 'camera'], ['btn-theme', 'Theme', 'palette']]]
+  ];
+  var ov = null;
+  function svg(n) { return '<svg viewBox="0 0 24 24">' + I[n] + '</svg>'; }
+  function close() { if (ov) ov.classList.remove('open'); }
+  function build() {
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'qa-ov';
+      ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+      document.body.appendChild(ov);
+    }
+    var sh = document.createElement('div'); sh.id = 'qa-sheet';
+    sh.innerHTML = '<div id="qa-grab"></div><div class="qa-title"><span>Menu</span><button type="button" aria-label="Close">✕</button></div>';
+    sh.querySelector('.qa-title button').onclick = close;
+    GROUPS.forEach(function (g) {
+      var items = g[1].filter(function (t) { return document.getElementById(t[0]); });
+      if (!items.length) return;
+      var h = document.createElement('div'); h.className = 'qa-sec'; h.textContent = g[0]; sh.appendChild(h);
+      var grid = document.createElement('div'); grid.className = 'qa-grid';
+      items.forEach(function (t) {
+        var src = document.getElementById(t[0]);
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'qa-tile' + (t[3] ? ' hero' : '');
+        b.innerHTML = svg(t[2]) + (t[3] ? '<span>' + t[1] + '<small>' + t[3] + '</small></span>' : '<span>' + t[1] + '</span>');
+        if (src.classList.contains('active') || src.classList.contains('on') || (src.style && src.style.background)) b.classList.add('on');
+        b.onclick = function () { close(); setTimeout(function () { src.click(); }, 60); };
+        grid.appendChild(b);
+      });
+      sh.appendChild(grid);
+    });
+    ov.innerHTML = ''; ov.appendChild(sh);
+  }
+  function open() { build(); ov.classList.add('open'); }
+  var btn = document.getElementById('btn-menu');
+  if (btn) btn.onclick = open;
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
 </script>
 </body>
 </html>
