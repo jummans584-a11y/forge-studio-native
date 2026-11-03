@@ -27393,6 +27393,7 @@ var FA_PRO = (function () {
       buildAttach: () => safe('Attach', buildAttach),
       buildArmor: () => safe('Armor', buildArmor),
       buildWeights: () => safe('Weights', buildWeights),
+      openClip(q) { st.q = String(q || ''); st.cat = 'All'; charDockTab = 'animlab'; buildCharacterDock(); }, // used by the global Search
       syncPreview() { if (st.preview) st.preview.visible = (charDockTab === 'autorig'); if (charDockTab !== 'autorig' && st.gh && st.gh.length) { try { ghost(false); } catch (e) {} } if (wp.on && charDockTab !== 'weights') wpDisable(); },
       onCharacterCleared() { if (wp.on) wpDisable(); wp.data = null; wp.undo = []; clearPreview(); st.A = null; st.datas = null; st.rigCache = null; st.att = []; st.attSel = -1; },
       invalidate() { try { if (wp.on) wpDisable(); } catch (e) { } wp.data = null; wp.undo = []; try { clearPreview(); } catch (e) { } st.A = null; st.datas = null; st.rigCache = null; }
@@ -29581,6 +29582,7 @@ var FA_PRO = (function () {
 
     return {
       buildRig: () => safe('Animal Rig', buildRig), buildAnim: () => safe('Animal Anim', buildAnim),
+      openClip(q) { st.q = String(q || ''); st.showAll = true; charDockTab = 'animalanim'; redock(); }, // used by the global Search
       sync() { if (st.preview) st.preview.visible = (charDockTab === 'animalrig'); requestRender(); },
       cleared() { clearPreview(); st.cache = null; st.rig = null; st.M = null; st.datas = null; }
     };
@@ -32093,7 +32095,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
   const VoxelBuild = (function () {
     const KEY = 'forgeVoxelBuild_v1';
     const SIZES = [0.02, 0.05, 0.1, 0.125, 0.25, 0.5, 1, 2];
-    const INV_N = 256, CAT_V = 5;
+    const INV_N = 256, CAT_V = 6;
     const W = {
       S: null, cells: new Map(), defs: new Map(), nextId: 100, inv: new Array(INV_N).fill(0), hot: [6, 1, 2, 8, 9, 10, 11, 7, 14], slot: 0,
       tool: 'place', digShape: 'square', digSize: 3, digDepth: 1, foundation: false, onGround: true,
@@ -32273,6 +32275,29 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       // trapdoors can now be opened (tap) -> they stand against the wall like a shutter
       [5240, 5241].forEach(id => { const c = byId.get(id), o = add(Object.assign({}, c, { boxes: [[0, 0, .81, 1, 1, 1]], hidden: true, tog: id })); delete o.orient; c.orient = true; c.tog = o.id; });
     })();
+    // ---- v16: tidy catalogue — duplicates hidden (still render in old worlds), consistent names, categories, sorted ----
+    (function organiseV16() {
+      const CATS = ['Natural', 'Stone & Bricks', 'Wood', 'Colours', 'Glass', 'Ore & Metal', 'Lights', 'Stairs', 'Slabs', 'Walls & Fences', 'Doors & Windows', 'Decor'];
+      const RENAME = { 3: 'Stone Bricks', 6: 'Oak Planks', 7: 'Oak Log', 8: 'Bricks', 12: 'Oak Slab', 13: 'Stone Brick Slab', 29: 'Dark Oak Planks', 32: 'Nether Bricks', 52: 'Dark Oak Slab', 5236: 'Glass Pane' };
+      PREMADE.forEach(p => { if (RENAME[p.id]) p.name = RENAME[p.id]; });
+      // duplicates: flat concretes that repeat a wool colour, and the extra spruce / sandstone shape variants
+      const DUP_CONCRETE = new Set([37, 38, 39, 40, 42, 43, 45]);
+      PREMADE.forEach(p => { if (DUP_CONCRETE.has(p.id) || /^Spruce (Slab \(Top\)|Stairs \(Upside Down\)|Stairs Corner)/.test(p.name) || /^Sandstone Stairs Corner/.test(p.name)) p.hidden = true; });
+      const NAT = new Set([4, 5, 15, 16, 17, 18, 21, 22, 49, 66, 67, 68, 80, 82, 83, 84, 88, 89, 5106, 5109]), WOOD = new Set([6, 7, 29, 30, 31, 55, 56, 57, 58, 59, 60, 61, 62, 64]), ORE = new Set([24, 25, 26, 27, 76, 77, 78, 79]), LIGHT = new Set([14, 28]), DECOR = new Set([63, 65, 85, 86, 87]);
+      const catOf = p => {
+        const n = p.name;
+        if (/Stairs/.test(n)) return 'Stairs'; if (p.shape === 'slab' || /Slab/.test(n)) return 'Slabs'; if (p.boxes && /Wall$|Fence/.test(n)) return 'Walls & Fences';
+        if (/Door|Trapdoor|Ladder|Glass Pane|Iron Bars/.test(n)) return 'Doors & Windows'; if (/Carpet/.test(n)) return 'Decor'; if (n === 'Torch') return 'Lights';
+        if (NAT.has(p.id)) return 'Natural'; if (WOOD.has(p.id)) return 'Wood'; if (ORE.has(p.id)) return 'Ore & Metal'; if (LIGHT.has(p.id)) return 'Lights'; if (DECOR.has(p.id)) return 'Decor';
+        if (p.pat === 'glass') return 'Glass'; if (/Wool|Concrete/.test(n)) return 'Colours'; return 'Stone & Bricks';
+      };
+      PREMADE.forEach(p => { p.cat = catOf(p); });
+      const byName = new Set(['Stairs', 'Slabs', 'Walls & Fences']);
+      const idx = new Map(PREMADE.map((p, i) => [p, i]));
+      const vis = PREMADE.filter(p => !p.hidden), hid = PREMADE.filter(p => p.hidden);
+      vis.sort((a, b) => { const ca = CATS.indexOf(a.cat), cb = CATS.indexOf(b.cat); if (ca !== cb) return ca - cb; if (byName.has(a.cat)) return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; return idx.get(a) - idx.get(b); });
+      PREMADE.length = 0; vis.concat(hid).forEach(p => PREMADE.push(p));
+    })();
     function resetDefs() { W.defs.clear(); PREMADE.forEach(d => W.defs.set(d.id, Object.assign({ shape: 'cube', opacity: 1, glow: false, custom: false }, d))); }
     resetDefs();
     // ---- v14-9: shaped blocks (doors, stairs, fences, windows ...) = boxes inside one cell; facing = camera direction ----
@@ -32294,9 +32319,12 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     }
     function defaultInv() { const a = new Array(INV_N).fill(0), vis = PREMADE.filter(p => !p.hidden); for (let i = 0; i < vis.length && i < INV_N; i++) a[i] = vis[i].id; return a; }
     function normalizeInv(catV) {
+      if ((catV | 0) < CAT_V) { // old catalogue order -> rebuild: all visible blocks sorted by category, the player's own custom blocks after them
+        const pm = new Set(PREMADE.map(p => p.id)), cust = W.inv.filter(id => id && !pm.has(id) && W.defs.has(id) && !W.defs.get(id).hidden);
+        W.inv = PREMADE.filter(p => !p.hidden).map(p => p.id).concat(cust); while (W.inv.length < INV_N) W.inv.push(0); W.inv.length = INV_N;
+      }
       const seen = new Set();
       for (let i = 0; i < INV_N; i++) { const id = W.inv[i]; if (!id) { W.inv[i] = 0; continue; } if (!W.defs.has(id) || seen.has(id) || W.defs.get(id).hidden) W.inv[i] = 0; else seen.add(id); }
-      if ((catV | 0) < CAT_V) PREMADE.forEach(p => { if (!p.hidden && !seen.has(p.id)) { const k = W.inv.indexOf(0); if (k >= 0) { W.inv[k] = p.id; seen.add(p.id); } } });
       const hs = new Set();
       for (let i = 0; i < 9; i++) { const id = W.hot[i]; if (!id) { W.hot[i] = 0; continue; } if (!W.defs.has(id) || hs.has(id)) W.hot[i] = 0; else hs.add(id); }
     }
@@ -33066,14 +33094,15 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       if (!invPanel) return; invPanel.innerHTML = '';
       const hd = mkEl('div', 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;'); hd.appendChild(mkEl('b', 'font-size:15px;', '🎒 Inventory')); hd.appendChild(btn('Band karo', closeInv, true)); invPanel.appendChild(hd);
       invPanel.appendChild(mkEl('div', 'font-size:11px;color:var(--ink-dim,#999);margin-bottom:6px;', 'Block par tap = neeche chune hue hotbar slot mein lag jaata hai. Khali ＋ slot par tap = apna custom block banao.'));
-      const g = mkEl('div', 'display:grid;grid-template-columns:repeat(6,1fr);gap:5px;justify-items:center;');
+      const g = mkEl('div', 'display:grid;grid-template-columns:repeat(6,1fr);gap:5px;justify-items:center;'); let lastCat = null;
       for (let i = 0; i < INV_N; i++) {
         const id = W.inv[i], d = id ? W.defs.get(id) : null, b = slotBtn(d, 48, W.pendingSlot === i); if (d) b.title = d.name;
+        if (d && (d.cat || 'Custom') !== lastCat) { lastCat = d.cat || 'Custom'; g.appendChild(mkEl('div', 'grid-column:1/-1;justify-self:stretch;text-align:left;font-size:11px;font-weight:700;opacity:.85;margin:8px 0 2px;padding-bottom:2px;border-bottom:1px solid rgba(255,255,255,.15);', lastCat)); }
         b.onclick = () => { if (d) { setHot(W.slot, d.id); W.pendingSlot = i; scheduleSave(); } else openEditor(i, null); renderInv(); };
         g.appendChild(b);
       }
       invPanel.appendChild(g);
-      { const rs = btn('🔄 Default blocks wapas laao', () => { PREMADE.forEach(p => { if (!p.hidden && W.inv.indexOf(p.id) < 0) { const k = W.inv.indexOf(0); if (k >= 0) W.inv[k] = p.id; } }); scheduleSave(); renderInv(); }); rs.style.marginTop = '8px'; invPanel.appendChild(rs); }
+      { const rs = btn('🔄 Default blocks wapas laao (category order)', () => { normalizeInv(0); scheduleSave(); renderInv(); }); rs.style.marginTop = '8px'; invPanel.appendChild(rs); }
       const sd = W.pendingSlot >= 0 ? W.defs.get(W.inv[W.pendingSlot]) : null;
       if (sd) { const info = mkEl('div', 'margin:8px 0 2px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;'); info.appendChild(mkEl('b', '', sd.name + (sd.shape === 'slab' ? ' (aadha)' : ''))); if (sd.custom) info.appendChild(btn('✎ Edit', () => openEditor(W.pendingSlot, sd))); info.appendChild(btn('Slot khali karo', () => { W.inv[W.pendingSlot] = 0; W.pendingSlot = -1; scheduleSave(); renderInv(); })); invPanel.appendChild(info); }
       invPanel.appendChild(mkEl('div', 'margin:10px 0 4px;font-size:12px;color:var(--ink-dim,#999);', 'Hotbar (tap = slot chuno):'));
@@ -34757,7 +34786,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       box.appendChild(pw);
       const qq = hubQ.trim().toLowerCase();
       MODS.forEach(([m, title]) => {
-        const list = TOOLS.filter(t => t.mod === m && (!qq || (t.label + ' ' + t.id).toLowerCase().indexOf(qq) >= 0)); if (!list.length) return;
+        const list = TOOLS.filter(t => t.mod === m && (!qq || (t.label + ' ' + t.id + ' ' + (t.kwAll || '')).toLowerCase().indexOf(qq) >= 0)); if (!list.length) return;
         box.appendChild(E('div', 'th-sec', title)); const w = E('div', 'th-wrap'); list.forEach(t => w.appendChild(chip(t))); box.appendChild(w);
       });
       if (hadFocus) { const n = hubOv.querySelector('.th-in'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }
@@ -34944,6 +34973,73 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     }
     reg('vfx-presets', 'vfx', '💾', 'VFX Presets', openPresets);
 
+    // ------------------------------------------------------------------ SEARCH INDEX v2 (additive)
+    // Goal: EVERYTHING in the app is findable from 🔎 Search (Ctrl+K / "/") and the Tool Hub box:
+    //  1) every tab / tool is registered (Char "Fix", Animator, Shape Studio, VFX Graph, Sound Lab, VFX Library, Armor & Terrain games, Quad Remesh, ACES…)
+    //  2) every tab's inner features are searchable ("Armor Forge › Mirror L→R") and open that tab
+    //  3) every Anim Lab animation + every Animal animation is searchable (opens the tab with that animation filtered)
+    //  4) whatever button is visible on screen right now is searchable ("On screen")
+    //  5) Hinglish / English synonyms (aag = fire, talwar = sword, gana = sound / music …) + ranked results
+    const FEATURE_INDEX = {"char-character":["ℹ Info","Paint Texture","meshes /","Fix dark / missing textures","Fixed","and removed","Import a different FBX/GLB","Go to Animation tab","Model & texture","Import FBX/GLB","Load texture image","clear paint","Export texture PNG","Character A","Loaded","Not loaded","Replace / import different","Character B","Loaded —","Replace","Import Character B","0 0 auto","Character A — Information","Height","Width","Depth","Position","Rotation","Scale","Meshes","Materials","Vertices","Bones","Character Scale","Reset scale to 1×","reset Character A scale","Character B — Information","reset Character B scale","Go to Compare tab"],"char-animation":["Select all","Select none","Preview & Timeline","Previous frame","Pause","Play","Next frame","Stop and clear preview","FPS","Loop","Walk","Run","Eat","Idle","Mirror legs","Strength","Animation Browser","s skeleton by bone-name matching","Stop","Blend Two Animations","Animation A","Animation B","blend animation"],"char-export":["selected animation","Export Character","Include texture","Painted texture will be embedded","Off — exports plain untextured geometry","Include animation","Will embed","Export formats","export-grid","Binary glTF — mesh","Export .gltf","character.gltf","Export .obj","character.obj","Export"],"char-objects":["BUTTON","Body part","body part","Removed \"","that piece","Search added items by name…","char-objlist-wrap","Single-piece item","Piece"],"char-skeleton":["Skeleton Inspector","Go to Character tab","Character A","Character B","Character","Bones: ON","Bones: OFF","Names: ON","Names: OFF","Skeleton Size","Search bones by name…","Bone Hierarchy","Name","Parent","Children","Length","0 0 auto","Deselect"],"char-rig":["Rig","Not loaded","Go to Character tab","Character A and Character B","Character A","Character B","Rig Detection","Metric","Root Bone","Bones","Recognized","Rig Type","Rig Compatibility","Confirm","Bone Mapping — A ➜ B","Auto Match Bones","Bones auto-matched —","Search bones by name…","0 0 auto","Import onto A"],"char-pose":["Pose Editor","Go to Character tab","Character A","Character B","Character","Select Bone","XYZ","Rotate","Move","Whole-Pose Actions","Pose name…","0 0 auto","Save Pose","Load Pose"],"char-fix":["Fix Studio — mesh repair","Camera","Grab","Single dot","Pull","Push","Smooth","Brush size","Hide dots","Show dots","1 · Audit","Run audit","Undo last fix","2 · Cracks, seams, holes","Weld tolerance","Stitch cracks","Fill holes","Max hole edges","3 · Normals & faces","Crease angle","Smooth across seams","Fix inside-out","Remove bad tris","4 · Neck / region smooth","From height %","To height %","Iterations","Strength","Smooth region","5 · Materials & textures","Repair textures","Fixed","Double-sided","Double-sided on"],"char-tools":["Character Tools","Go to Character tab","Character A","Character B","Measure: ON","Measure","Height","Width","Depth","Height Comparison","Full side-by-side Compare view","Alignment","Centers Character","Character","Resets Character","These act on Character"],"char-compare":["Compare Mode","Not loaded","Go to Character tab","Exit Compare Mode","Enter Compare Mode","0 0 auto","Reframe","Statistics","Metric","Diff","Height","Width","Depth","Meshes","Vertices","Bones","the same height as","taller than","shorter than","Character B is","Two-Character Preview","Stop Same Animation on Both","Play Same Animation on Both","Retarget \"","Live Match Diagnostics","Playhead offset: —","s bones against Character B"],"char-autorig":["Auto Rig — measured humanoid skeleton","Rebuild rig with fingers","Open Anim Lab","Attach props","Checking rig…","Re-run rig quality check","Check rig quality","Facing","Auto","Re-analyse","1. Analyse body & place joints","T-pose","A-pose / arms-down","Pelvis / hip height","Knee height","Hip spacing","Neck position","Shoulder height","Shoulder width","Arm length","Body","Hips","Spine","Spine1","Spine2","Neck","Head","HeadTop_End","L Arm","LeftShoulder","LeftArm","LeftForeArm","LeftHand","LeftHand_End","R Arm","RightShoulder","RightArm","RightForeArm","RightHand","RightHand_End","L Leg","LeftUpLeg","LeftLeg","LeftFoot","LeftToeBase","LeftToe_End","R Leg","RightUpLeg","RightLeg","RightFoot","RightToeBase","RightToe_End","L Fingers","Left","R Fingers","Right","HandThumb","Thumb","HandIndex","Index","HandMiddle","Middle","HandRing","Ring","HandPinky","Pinky","ToeBase","Toe"],"char-animlab":["Open AutoRig","Character tab","standard humanoid names","finger bones","Hair / skirt / bust motion","Intensity","Speed","Mirror L↔R","Feet stay on ground","Flip finger curl","Search all","All","Add all","Reset to rest pose","Make your own animation","Relaxed","REL","OPEN","Flat","FLAT","Fist","FIST","Grip","GRIP","Spell","CAST","Claw","CLAW","Point","POINT","Pinch","PINCH","Reset pose","Mirror pose","Animation length","Keyframe time","Add keyframe here","Update selected","Delete selected","Name","Loop","Create & play animation","Hoe","Pickaxe","Shovel","Scythe","Pitchfork","Fishing rod","Hammer","Watering can","Bucket","Basket","Sack","Sword","Axe","Staff","Shield","Pistol","Torch","Backpack","Helmet","Top hat","R Hand","L Hand"],"char-armor":["Saved armour character par lagao","AutoRig kholo","Yahan finger se draw karo","Mirror L→R","Bada","Chhota","Chauda","Lamba","Simplify","Colour","Kahan pehnana hai","Dono side: ON","Dono side: OFF","Character par lagao"],"char-attach":["Open AutoRig","Import my own prop…","Attach to bone","Any bone","Rotate X°","Rotate Y°","Rotate Z°","Size","Armor colour","Metal","Rough","Glow","Duplicate","Hide","Show","Remove","Left","Right","weight paint"],"char-weights":["Painting ON — tap to stop","Bone to paint","Prev bone","Next bone ▶","Subtract","Replace","Smooth","Inspect","Brush size","Strength","Mirror L↔R","Heatmap","Whole-body tools","Undo stroke","Reset to auto weights"],"char-animalrig":["Animal rig present —","Open Animal Anim","Skeleton view","Rig tools","1 · Creature type","2 · Analyse the body","Analyse body & preview skeleton","Detected: creature faces","OFF","Flip head direction","Auto","Re-analyse","3 · Proportions","Tail length","Neck length","Head size","Leg height","Neck bones","Tail bones","Body segments","Abdomen share","Leg pairs","Arms / tentacles","Segments per arm","Spine height","Wings","Antennae","Ears","Upright posture","Wing span ×","4 · Fine-tune a joint","Forward / back","Left / right","Up / down","Mirror to the other side","Reset joint","Reset all joints","5 · Skin & build","Skin reach ×","Skin sharpness","Build Animal Rig"],"char-animalanim":["Animal Animations — fantasy creature library","Open Animal Rig","with wings","Speed","Intensity","Add all","to my list","Remove animal clips","remove animal clips","Show all","Animation"],"char-windpaint":["WindPaint","Hair","Cloth","Other","Off","wind paint","wind auto weights","wind fill","wind smooth","1 · Parts ko role do","Auto-detect roles","Hair: pinned top","Cloth: pinned top","Cloth: tight distance","Cloth: free distance","Curve","Smooth passes","Auto Hair","Auto Cloth","Auto Other","Fill all 1","Clear all 0","Smooth ×2","Smooth","3 · Paint karo","Painting ON — tap to stop","Paint","Brush size","Strength","Softness","OFF","Wind: ON","Wind: OFF","Calm","Breeze","Strong","Storm","Direction","Gust speed","Turbulence","Weight curve","Hair strength ×","Cloth strength ×","5 · Export / engine","Bake","Copy Godot wind shader","Wind Paint","Load a character first","Stitched","Normals smoothed across seams","Removed","degenerate triangles","Flipped","Winding already correct","Filled","too large/complex"],"char-cut":["Piece","ForgeCut]","Head","Hand_R","Hand_L","Feet","split loose parts","Cutting…","Cut done — \"","Auto-splitting head, hands, feet…","Foot_","auto-split body","Split into","Looking for loose parts…","Part","forgecut-selcount","faces selected","Deleted","Deleting selection…","Separating…","Left","Right","Mirroring…","Mirror copy \"","Merging…","Item ·","Reading","Import ·","Fitting…","vertices ·","Plane","Lasso","Brush","Linked","Free plane ↔ X","Free plane ↕ Y","Free plane ⇵ Z","Slide","Tilt 1","Tilt 2","Flip side","Cut now","Auto-split head + hands + feet","Remove","Freehand","Box","Brush size","Shrink −","Invert","All","Undo select","Separate selected → new piece","Delete selected","Loose parts","Split loose parts","Mirror","Merge","Replace a part","Slot to fill","New part","Match size","Match cut ring"],"terr-erosion":["Erosion simulation","Passes","Simulate Erosion"],"terr-sculpt":["This map has","meshes /","Sculpt mode","Mountain — tap to sculpt","Orbit","Mountain","Pit","Smooth","Flatten","Slope","Terrace","Crater","Valley","Height","Strength","Width","Sharpness","Roundness","Noise","Brush","Size","Falloff","Direction","Step","Height Lock","Height Lock: ON","Height Lock: OFF","Min height","Max height","Reset to flat","reset to flat"],"terr-paint":["This map has","meshes /","Orbit","Paint","Paint as","Texture","Flat color","Change","Tile","Tint","Size","Opacity","clear vertex paint","Fix dark / missing textures","Fixed","and removed","Tool","Brush","Eraser","Smudge","Blur","Fill","Clone","Picker","Material","Sharpen","Dodge","Burn","Grunge","Decal","Import photo for \"","Load texture image","Load decal image","file-input-decal","Color","Brush controls","Strength","Hardness","Spacing","Falloff","Smooth","Linear","Hard","Texture Layers","Duplicate","Merge down","Clear all layers","clear ground paint","Replace ground texture image","Load ground texture image","Remove base texture","remove base texture","Tile size","Rotation"],"terr-object":["Orbit","Select","Delete brush","Brush","Multi","t want\" doesn","Select all shown","Clear selection","Search objects by name…","All","objlist-wrap","BUTTON","auto by category","manual override","selected — Transform","Select similar","Spacing","Scale","Align to ground","Reset transform","reset transform","Duplicate","Count","Duplicate ×","Replace / Delete","Replace selected with asset","Delete selected","Delete","Delete similar","Stone","Cobblestone","Stone Brick","Dirt","Sand","Wood Planks","Log","Brick","Plaster Wall","Glass","Roof Tile","Wood Slab","Stone Slab","Lamp","Grass Block","Snow","Ice","Leaves","Sandstone","Terracotta","Clay","Gravel","Obsidian","Iron Block","Gold Block","Diamond Block","Coal Block","Sea Lantern","Dark Planks","Birch Planks","Birch Log","Nether Brick","Mossy Cobblestone","Smooth Stone","Polished Blackstone","Checker Floor","Red Concrete","Orange Concrete"],"terr-voxel":["Rakho","Todo","Pick","Badlo","Gadda","Bharo","Select","Block rakho","Block todo","Block badlo","Ground mein gadda","Ground bharo / uthao","Area select & copy","Cut","Blocks hatao","Upar +1","Upar −1","Neeche +1","Neeche −1","Auto fit","Select hatao","Yahan paste karo","Ghumao 90°","Palto","Ground bhi paste karo","Settings","Blocks dikhao","Save / Export","Abhi save","File save","File load","Sab blocks hatao","Inventory","Band karo","Custom","Slot khali karo","Mera Block","Naya custom block","Block edit","Rang","Pattern","Image hatao","Poora block","Shape","Cancel","Banao","Save","Custom Block"],"terr-blocks":["Add block","From Library","Choose from Library","Transform the selected block","transform block"],"terr-vegetation":["Asset","None selected","Orbit","Paint","Density","Brush radius","Spacing","Ground rise","Base size","Min scale","Max scale","Min slope°","Max slope°","Rotate","Select & resize placed items","Clear all grass"],"terr-material":["Orbit","Select","Color","material color","emissive intensity","Rough","Metal","Opacity","Emit ×","Emit","emissive color","Remove all textures","Texture tiling & rotation","texture tile X","texture tile Y","texture offset X","texture offset Y","texture rotation","Tile X","Tile Y","Offset X","Offset Y","Rotate","Reset tiling/rotation","reset texture tiling","Apply ground material","Applying to all","Editing material for \""],"terr-road":["Orbit","Trace path","Width","Color","Clear path"],"terr-water":["Type","Lake / Pond","River","Orbit","Tap","Level","Opacity","Rough","Color","Place lake"],"terr-layers":["Clear all","Delete all","delete layer"],"terr-optimize":["Hide","Hid","Merge","meshes after merging \"","Texture resolution","Textures capped at","Preview","Snapshot current view","Compare vs snapshot","Manual comparison"],"terr-export":["export-grid","Export .gltf","map.gltf","Export .obj","map.obj"],"terr-import":["Or shape procedural ground","Replace heightmap image","Load heightmap image","New pattern","Generate heightmap","Feat. scale","Noise detail","Resolution presets","Low","Medium","High","New terrain size","Style","Rolling hills","Flat","Small","Large","XXL","Custom size"],"vfx-ws":["Record","Bloom: Off","Bloom: Soft","Bloom: Strong","Animator + VFX linked","Not linked","Backdrop","Video / Photo","Enemy X","Light","Normal","Rich","Clear all","Blank","Layer","Layers","Visible","Hidden","Delete","Emitter shape","Type","Mesh","Shape","Rotate Y°","Rotate Z°","Down","Right","Left","Forward","Back","Position & direction","Size","Radial","Emission","Rate/s","Burst","Life min","Life max","Speed min","Speed max","Max count","Seed","Travel m/s","To enemy","Physics","Gravity","Drag","Turbulence","Swirl","Spin","Bounce","Vortex / Wind","Orbit rad/s","Pull to radius","Base radius","Vortex snap","Emitter motion / Time","Sway X","Sway Y","Sway Z","Sway /loop","Orbit radius","Orbit laps","Layer speed","Pre-warm s","Projectile: OFF","Enemy par: ON","Enemy par: OFF","Accelerate"],"vfx-animator":["FPS","Frames","Layer rename","Reverse","Linear","Smooth","Ease In","Ease Out","In/Out","Constant","Add object","Library","Rock","Shard","Crystal","Sphere","Cone","Ring","Shape Studio","Ice Projectile","Viewport","Gizmo: Move","Gizmo: Rotate","Gizmo: Scale","Gizmo: Off","Drag: Ground","Drag: Height","Save VFX","VFX name","Dream21_IceCast","Export / Import","Clone along path","Count","Rnd Scale","Clone Along Path","Properties ·","auto-key @F","Pos X","Color","Blend","Sharpen","Inflate","Shrink","Med","Low","SphereMesh","TorusMesh","CylinderMesh","PrismMesh","Obj_","BoxMesh","tracks/","text/plain","ForgeVFX.tscn","Trail","Trail −","Particles","Count −","FPS −","Frames −","High","Preview","vxSheet,","dragging-changed","PLAY"],"vfx-shape":["Front","Sculpt / Detail","Paint / Texture","Reset zoom/pan","Ab canvas par draw karo…","Re-smooth","Background","Background hatao","Front jaisa copy karo","Symmetry: On","Symmetry: Off","Size","Strength","Noise","Direction","Smooth","Linear","Hard","Smooth all","Inflate all","Deflate all","Roughen all","Reset sculpt","Brush","Eraser","Smudge","Blur","Fill","Clone","Picker","Material","Texture","Sharpen","Dodge","Burn","Grunge","Decal","Texture badlo","Texture load karo","Canvas par tap karo…","Clone source badlo","Clone source set karo","Decal badlo","Load decal image","Color","Hardness","Opacity","Spacing","Clear paint","Shape","Tint/Glow color","Blend","Save & Send","Save as…","Send to VFX","Helmet","Shoulder Pauldron","Chest Plate","Gauntlet / Bracer","Boot","Belt / Waist","Shield","Wing","Horn","Crest / Plume","Steel","Gold","Bronze","Dark Iron"],"vfx-graph":["Node…","Test effects…","AI Describe","Offline","New","Save","Graph name","saved ✓","Load","Export","Fit","Snap","Multi","Group","Params","Debug","Self-Test"],"vfx-lib":["VFX ·","files ·","Import ZIP","Update “","Current VFX → library","Godot .tscn ZIP","Na-pehchani JSON report","Library hatao"]};
+    const SAFE = (name, fn) => () => { try { fn(); } catch (e) { say('⚠ ' + name + ' abhi khul nahi paya: ' + ((e && e.message) || e), 3200); } };
+    reg('char-fix', 'char', '🔧', 'Fix Studio (mesh repair)', () => openChar('fix'));
+    reg('char-armor-game', 'all', '🎮', 'Armor Forge — 3D building game', SAFE('Armor Forge', () => { goWs('character'); window.ForgeArmorGame.open(); }));
+    reg('terr-game', 'all', '🎮', 'Terrain / Build Game (character ban kar banao)', SAFE('Terrain Game', () => { goWs('terrain'); window.ForgeTerrainGame.open(); }));
+    reg('vfx-animator', 'vfx', '🎞', 'Animator (keyframe objects)', SAFE('Animator', () => { goWs('vfx'); kfToggle(true); }));
+    reg('vfx-shape', 'vfx', '🧪', 'Shape Studio (draw → 3D shape)', SAFE('Shape Studio', () => { goWs('vfx'); kfToggle(true); kfShapeStudio(); }));
+    reg('vfx-graph', 'vfx', '🕸', 'VFX Graph (node editor)', SAFE('VFX Graph', () => { goWs('vfx'); vgOpen(); }));
+    reg('vfx-sound', 'vfx', '🎛', 'Sound Lab (VFX sounds)', SAFE('Sound Lab', () => { goWs('vfx'); slOpen(); }));
+    reg('vfx-export', 'vfx', '📦', 'VFX Export / Import (Godot .tscn, GLB, .vfx.json)', SAFE('VFX Export', () => { goWs('vfx'); if (!document.getElementById('vxSheet')) vxSheet(); }));
+    reg('vfx-lib', 'vfx', '🗂', 'VFX Library (ZIP of effects)', SAFE('VFX Library', () => { goWs('vfx'); vxLibSheet(); }));
+    reg('vfx-bloom', 'vfx', '🌟', 'Bloom: Off / Soft / Strong', SAFE('Bloom', () => { goWs('vfx'); VPost.m = (VPost.m + 1) % 3; vfxUI(); requestRender(); say('Bloom: ' + ['Off', 'Soft', 'Strong'][VPost.m], 1600); }));
+    reg('quad-remesh', 'all', '⬣', 'Quad Remesh (retopology)', SAFE('Quad Remesh', () => { if (window.__forgeQuadRemesh) window.__forgeQuadRemesh.open(); else say('Quad Remesh abhi ready nahi hai — thodi der baad try karo', 2000); }));
+    reg('act-aces', 'all', '🎞', 'Filmic tone mapping (ACES) on/off', clickId('btn-aces'));
+    reg('act-menu', 'all', '▦', 'Menu (saare top-bar buttons)', clickId('btn-menu'));
+    const TOOL_KW = {
+      'ai-anim': 'animation ai banao walk run attack', 'ai-vfx': 'effect particles fire magic ai', 'ai-rig': 'rig skeleton bones fix ai', 'ai-map': 'map terrain jungle road river ai',
+      'ai-copilot': 'assistant ek prompt sab', 'act-assets': 'library saved models', 'act-theme': 'settings appearance dark light accent color', 'act-light': 'lighting light sun',
+      'act-snap': 'screenshot photo picture save image', 'act-projects': 'save load new project file',
+      'char-character': 'import fbx glb model load info paint texture dimensions', 'char-objects': 'items added outfit clothes hair accessories inventory',
+      'char-skeleton': 'bones joints hierarchy skeleton size', 'char-rig': 'rig editor joint move rotate gizmo bone', 'char-animation': 'clips timeline play animation list import mixamo',
+      'char-export': 'glb fbx save download export model', 'char-cut': 'cut split slice delete part mesh surgery weld', 'char-autorig': 'auto rig skeleton humanoid weights skin hands fingers hair skirt',
+      'char-animlab': 'animations ready clips walk run jump sword farm combat combo hit-stop hand pose secondary motion', 'char-animalrig': 'animal creature dragon wings tail quadruped rig',
+      'char-animalanim': 'animal creature fly bite slither fire dragon animations', 'char-windpaint': 'wind hair cloth cape sway paint', 'char-attach': 'attach weapon sword item hand bone equip',
+      'char-armor': 'armour armor kavach draw outfit helmet', 'char-armor-game': 'armour armor kavach game build blocks', 'char-weights': 'weight paint skin bend bind', 'char-compare': 'compare two characters a b retarget sync',
+      'char-pose': 'pose save load mirror', 'char-tools': 'measure ruler tools scale', 'char-fix': 'repair holes cracks normals neck smooth vertex edit textures dark double sided',
+      'terr-sculpt': 'mountain pit smooth flatten slope terrace crater valley height pahad', 'terr-paint': 'paint texture brush colour layers', 'terr-object': 'select move delete duplicate replace objects hierarchy',
+      'terr-blocks': 'blocks minecraft cubes', 'terr-voxel': 'build minecraft voxel blocks game', 'terr-vegetation': 'trees grass flowers bushes rocks ped jungle', 'terr-import': 'heightmap image generate terrain noise',
+      'terr-export': 'export map glb obj save', 'terr-material': 'material pbr textures', 'terr-erosion': 'erosion rain smooth realistic', 'terr-road': 'road path sadak', 'terr-water': 'water lake river paani nadi jheel',
+      'terr-layers': 'layers opacity hide', 'terr-optimize': 'optimize reduce polygons lod performance', 'terr-game': 'game build character blocks',
+      'vfx-ws': 'effects particles layers presets projectile fire timeline', 'vfx-presets': 'save load effect', 'vfx-animator': 'keyframe frame animation objects timeline', 'vfx-shape': 'draw outline 3d sculpt paint texture',
+      'vfx-graph': 'nodes node graph editor', 'vfx-sound': 'sound audio music song gana awaaz sfx', 'vfx-export': 'godot tscn glb json import export save', 'vfx-lib': 'zip library packs godot batch',
+      'surface-decal': 'decal sticker image stamp photo crop', 'quad-remesh': 'retopo retopology remesh quad mesh'
+    };
+    TOOLS.forEach(t => { t.kw = TOOL_KW[t.id] || ''; t.kwAll = t.kw + ' ' + (FEATURE_INDEX[t.id] || []).join(' '); });
+    // Hinglish ↔ English synonyms — a typed word also matches these.
+    const SYN = {
+      aag: 'fire flame', agni: 'fire', paani: 'water', pani: 'water', nadi: 'river', jheel: 'lake', pahad: 'mountain', pahaad: 'mountain', sadak: 'road', ped: 'tree', jungle: 'forest vegetation tree',
+      ghaas: 'grass', patthar: 'rock stone', talwar: 'sword', chalna: 'walk', daud: 'run', kudo: 'jump', kudna: 'jump', nachna: 'dance', hawa: 'wind', bijli: 'lightning thunder', barf: 'ice snow',
+      dhuan: 'smoke', dhamaka: 'explosion', awaaz: 'sound', awaz: 'sound', gana: 'song music sound audio', gane: 'song music sound audio', song: 'sound music audio', music: 'sound audio song', audio: 'sound music',
+      kavach: 'armor armour', haddi: 'bone skeleton', rang: 'color colour paint', mitao: 'delete erase', hatao: 'remove delete', photo: 'snapshot image decal', pankh: 'wings', poonch: 'tail',
+      baal: 'hair', haath: 'hand fingers', pair: 'foot leg', fire: 'flame aag', skeleton: 'bones rig', bones: 'skeleton rig', retopo: 'remesh quad', sticker: 'decal', screenshot: 'snapshot',
+      weapon: 'sword attach', hit: 'attack impact', save: 'project export', load: 'import open', dark: 'theme', light: 'theme lighting'
+    };
+    const deepItems = () => {
+      const out = [];
+      Object.keys(FEATURE_INDEX).forEach(id => { const t = byId(id); if (!t) return; FEATURE_INDEX[id].forEach(f => out.push({ icon: t.icon, label: t.label + ' › ' + f, tag: modName(t.mod) + ' feature', deep: 1, run: () => runTool(t) })); });
+      try { (FA_CORE.CLIPS || []).forEach(c => out.push({ icon: '🎭', label: 'Animation: ' + c.name, tag: 'anim lab animation ' + (c.group || c.cat || '') + ' ' + c.id, deep: 1, run: () => { openChar('animlab'); try { FA_UI.openClip(c.name); } catch (e) {} } })); } catch (e) { }
+      try { (FA_ANIMAL.LIB || []).forEach(d => out.push({ icon: '🐲', label: 'Animal animation: ' + d.name, tag: 'animal creature animation ' + (d.group || '') + ' ' + d.id, deep: 1, run: () => { openChar('animalanim'); try { FA_ANIMAL_UI.openClip(d.name); } catch (e) {} } })); } catch (e) { }
+      // live: every visible button / label in the open panels (covers anything added later, with no list to maintain)
+      try {
+        const seen = new Set(), roots = [dock, vp, document.getElementById('kfPanel'), document.getElementById('ssPanel'), document.getElementById('slRoot')].filter(Boolean);
+        roots.forEach(r => r.querySelectorAll('button, .sec-label, h4, label').forEach(el => {
+          if (!el.offsetParent) return; const tx = (el.textContent || '').replace(/\s+/g, ' ').trim(); if (tx.length < 3 || tx.length > 56 || seen.has(tx.toLowerCase())) return; seen.add(tx.toLowerCase());
+          const isBtn = el.tagName === 'BUTTON'; out.push({ icon: '▸', label: 'On screen: ' + tx, tag: 'here visible ' + (isBtn ? 'button' : 'section'), deep: 1, live: 1, run: () => { if (isBtn) el.click(); else el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } });
+        }));
+      } catch (e) { }
+      return out;
+    };
+
     // ------------------------------------------------------------------ Command palette
     let cpOv = null;
     function closePalette() { if (cpOv) { cpOv.remove(); cpOv = null; } }
@@ -34951,8 +35047,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const prefClick = (segId, v) => { const b = document.querySelector('#' + segId + ' button[data-v="' + v + '"]'); if (b) b.click(); };
     function paletteItems() {
       const out = [];
-      TOOLS.forEach(t => out.push({ icon: t.icon, label: t.label, tag: modName(t.mod), run: () => runTool(t) }));
-      out.push({ icon: '⬣', label: 'Quad Remesh — retopology (quad mesh banao)', tag: 'tool retopo remesher quad remesh', hidden: true, run: () => { if (window.__forgeQuadRemesh) window.__forgeQuadRemesh.open(); else say('Quad Remesh abhi ready nahi hai — thodi der baad try karo', 2000); } });
+      TOOLS.forEach(t => out.push({ icon: t.icon, label: t.label, tag: modName(t.mod) + ' ' + (t.kw || ''), run: () => runTool(t) }));
       out.push({ icon: '🪟', label: 'Tool window: float ↔ dock (neeche wala panel)', tag: 'setting window float dock panel', run: () => { if (window.__forgeFloatDock) window.__forgeFloatDock.toggle('Tools'); } });
       out.push({ icon: '🟩', label: 'Terrain ground dikhao / chhupao', tag: 'setting terrain ground plane show hide dikhao chhupao', run: () => { const u = window.__forgeUW; if (!u) return; const g = u.isGhost(); if (!u.setGroundVisible(g)) say('Abhi koi ground nahi hai', 2000); else say(g ? 'Ground dikh raha hai' : 'Ground chhup gaya (sirf character par kaam)', 2200); } });
       out.push({ icon: '🌐', label: 'Combined view: character + terrain ek saath (on/off)', tag: 'setting combined unified world wall character terrain ek saath', run: () => { const u = window.__forgeUW; if (!u) return; u.setOn(!u.on); say('Combined view ' + (u.on ? 'ON — character aur terrain ek hi scene mein' : 'OFF — pehle jaisa, ek waqt mein ek world'), 2600); } });
@@ -34962,7 +35057,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       out.push({ icon: '🔊', label: 'Click sound on/off', tag: 'setting', run: () => { const v = FX.sound ? '0' : '1'; prefClick('soundSeg', v); say('Sound ' + (v === '1' ? 'on' : 'off'), 1200); } });
       out.push({ icon: '📈', label: 'Performance meter on/off', tag: 'setting', run: () => { const v = ls.get('forge_perf', '0') === '1' ? '0' : '1'; prefClick('perfSeg', v); } });
       histLoad().slice(0, 12).forEach(x => out.push({ icon: x.s ? '⭐' : '🕘', label: x.t, tag: 'prompt', run: () => openAnyAI(guess(x.t), x.t, false) }));
-      return out;
+      return out.concat(deepItems());
     }
     function openPalette() {
       closePalette();
@@ -34970,15 +35065,20 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const box = E('div', 'th-box'); cpOv.appendChild(box);
       const h = E('div', 'th-h'); h.append(E('div', 'th-orb'), EH('div', 'th-ht', '<b>Search</b><span>Tool, setting ya purana prompt — likho aur Enter dabao</span>'));
       const x = E('button', 'th-x', '✕'); x.onclick = closePalette; h.appendChild(x); box.appendChild(h);
-      const inp = E('input', 'th-in'); inp.placeholder = 'jaise: fire, undo, theme, compact…'; inp.autocomplete = 'off'; box.appendChild(inp);
+      const inp = E('input', 'th-in'); inp.placeholder = 'jaise: fire, sword walk, mirror, gana, road, undo…'; inp.autocomplete = 'off'; box.appendChild(inp);
       const list = E('div', 'cp-list'); box.appendChild(list);
-      const all = paletteItems(); let shown = [], sel = 0;
+      const all = paletteItems(); let shown = [], sel = 0, total = 0;
       const draw = () => {
         const w = inp.value.toLowerCase().split(/\s+/).filter(Boolean);
-        shown = all.filter(it => { if (it.hidden && !w.length) return false; const s = (it.label + ' ' + it.tag).toLowerCase(); return w.every(k => s.indexOf(k) >= 0); }).slice(0, 40);
+        const alts = w.map(k => [k].concat((SYN[k] || '').split(' ').filter(Boolean)));
+        const rank = it => { const lab = it.label.toLowerCase(); let sc = it.live ? 6 : it.deep ? 3 : 0; alts.forEach(a => { let b = 9; a.forEach((k, ai) => { const i = lab.indexOf(k); if (i >= 0) b = Math.min(b, (i === 0 ? 0 : lab[i - 1] === ' ' || lab[i - 1] === '›' ? 1 : 2) + (ai ? 1 : 0)); }); sc += b === 9 ? 4 : b; }); return sc; };
+        const hits = all.filter(it => { if (!w.length && it.deep) return false; const s = (it.label + ' ' + it.tag).toLowerCase(); return alts.every(a => a.some(k => s.indexOf(k) >= 0)); });
+        total = hits.length;
+        shown = (w.length ? hits.map((it, i) => ({ it, i, r: rank(it) })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.it) : hits).slice(0, 60);
         sel = Math.min(sel, Math.max(0, shown.length - 1)); list.innerHTML = '';
         if (!shown.length) list.appendChild(E('div', 'th-note', 'Kuch nahi mila.'));
         shown.forEach((it, i) => { const b = E('button', 'cp-it' + (i === sel ? ' sel' : ''), it.icon + '  ' + (it.label.length > 60 ? it.label.slice(0, 58) + '…' : it.label)); b.type = 'button'; b.appendChild(E('small', '', it.tag)); b.onclick = () => { closePalette(); it.run(); }; list.appendChild(b); });
+        if (total > shown.length) list.appendChild(E('div', 'th-note', total + ' mile — pehle ' + shown.length + ' dikhaye, thoda aur likho to chhota ho jaayega.'));
       };
       inp.oninput = () => { sel = 0; draw(); };
       inp.onkeydown = e => {
@@ -37427,7 +37527,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
               si.oninput = () => { q = si.value.trim().toLowerCase(); fill(); }; body.appendChild(si); fill(); body.appendChild(g);
             }
           }
-          else if (tab === 'b') { const g = el('div', 'display:grid;grid-template-columns:repeat(5,1fr);gap:6px'); W.defs.forEach((d, id) => { if (d.hidden) return; g.appendChild(cell({ k: 'b', id }, 40, () => addInv({ k: 'b', id }))); }); body.appendChild(g); }
+          else if (tab === 'b') { const g = el('div', 'display:grid;grid-template-columns:repeat(5,1fr);gap:6px'); let lc = null; W.defs.forEach((d, id) => { if (d.hidden) return; if ((d.cat || 'Custom') !== lc) { lc = d.cat || 'Custom'; g.appendChild(el('div', 'grid-column:1/-1;font-size:11px;font-weight:700;opacity:.85;margin-top:6px;padding-bottom:2px;border-bottom:1px solid rgba(255,255,255,.15)', lc)); } g.appendChild(cell({ k: 'b', id }, 40, () => addInv({ k: 'b', id }))); }); body.appendChild(g); }
           else if (tab === 's') {
             const sl = (arr, cur, on) => { const s = el('select', 'padding:6px;border-radius:6px;background:#22283f;color:#fff;max-width:60%'); arr.forEach(([v, t], i) => { const o = el('option', '', t); o.value = i; if (i === cur) o.selected = true; s.appendChild(o); }); s.onchange = () => on(+s.value); s.onpointerdown = e => e.stopPropagation(); return s; };
             const mats = Array.from(W.defs.values()).filter(d => !d.hidden && !d.boxes).map(d => [d.id, d.name]), r1 = el('label', 'display:flex;justify-content:space-between;align-items:center;margin:4px 0'); r1.appendChild(el('span', '', 'Material')); r1.appendChild(sl(mats, mats.findIndex(x => x[0] === mat), i => { mat = mats[i][0]; })); body.appendChild(r1);
