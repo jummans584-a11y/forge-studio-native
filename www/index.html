@@ -32091,6 +32091,88 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     }
     return null;
   }
+  // ===== v17 REAL SANDPAPER — pure part (no THREE). Every block keeps wear on its 12 EDGES (0 = sharp .. 4 = fully round). =====
+  // Real sandpaper only removes material where it is rubbed, and edges / corners (most pressure) go first. So each edge has its own level;
+  // a corner is rounded by whatever edges meet there. The 12 levels are packed into ONE number (the "code") that rides inside the block id
+  // (id + VF * (turn + 4 * code)), exactly like the old uniform levels, so save / undo / copy / bake / export all keep working.
+  // code 0 = sharp, 1..4 = old uniform levels (old saves still load), >= 5 = 5 + base-5 number of the 12 edge levels.
+  const SM_FR = [0, 0.1, 0.2, 0.32, 0.5]; // edge radius at each level, as a fraction of the block size
+  // edge i: axis k = i >> 2; the other two axes (a < b); bit0 = side on a (1 = +), bit1 = side on b (1 = +)
+  function smEdge(i) { const k = i >> 2; return [k, k === 0 ? 1 : 0, k === 2 ? 1 : 2, (i & 1) ? 1 : -1, (i & 2) ? 1 : -1]; }
+  function smDecode(code) {
+    const L = new Array(12).fill(0); if (!(code > 0)) return L;
+    if (code <= 4) return L.fill(code);
+    let m = code - 5; for (let i = 0; i < 12; i++) { L[i] = m % 5; m = (m - L[i]) / 5; } return L;
+  }
+  function smEncode(L) {
+    let uni = true; for (let i = 1; i < 12; i++) if (L[i] !== L[0]) { uni = false; break; }
+    if (uni) return L[0];
+    let m = 0; for (let i = 11; i >= 0; i--) m = m * 5 + L[i]; return 5 + m;
+  }
+  // the same wear pattern after the block is turned r quarter-turns about Y (and optionally mirrored in X first) — used when a selection is pasted turned
+  function smTurn(code, r, mir) {
+    if (!(code > 4) || (!r && !mir)) return code;
+    const L = smDecode(code), N = new Array(12).fill(0);
+    for (let i = 0; i < 12; i++) {
+      const e = smEdge(i); let v = [0, 0, 0]; v[e[1]] = e[3]; v[e[2]] = e[4]; if (mir) v[0] = -v[0];
+      for (let q = 0; q < (r | 0) % 4; q++) v = [-v[2], v[1], v[0]];
+      const k = v.indexOf(0), a = k === 0 ? 1 : 0, b = k === 2 ? 1 : 2; N[k * 4 + (v[a] > 0 ? 1 : 0) + (v[b] > 0 ? 2 : 0)] = L[i];
+    }
+    return smEncode(N);
+  }
+  // Geometry of one worn block. Start from the cube surface; every vertex is pulled onto a rounded shape whose per-axis "insets" come from the
+  // edges whose zone it sits in (clamp to the inner box, then push out along the ellipsoid direction). The position depends only on the vertex
+  // position, so neighbouring faces meet with no cracks. Returns plain arrays: P (xyz), N (normals), U (uv), I (index), G ([start,count,material] x6, BoxGeometry order).
+  function sandShape(S, slab, L) {
+    const H = [S / 2, slab ? S / 4 : S / 2, S / 2], rE = [], radii = [[], [], []];
+    for (let i = 0; i < 12; i++) { const e = smEdge(i), r = Math.min(SM_FR[L[i]] * S, H[e[1]], H[e[2]], slab ? S / 4 : S); rE.push(r); if (r > 1e-9) [e[1], e[2]].forEach(a => { if (!radii[a].some(q => Math.abs(q - r) < 1e-9)) radii[a].push(r); }); }
+    const C = [0, 1, 2].map(a => {
+      const h = H[a], rs = radii[a], seg = rs.length <= 1 ? 6 : rs.length === 2 ? 4 : 3, v = [-h, h];
+      rs.forEach(r => { for (let k = 0; k <= seg; k++) { const t = r * k / seg; v.push(-h + t, h - r + t); } });
+      v.sort((x, y) => x - y); const o = []; v.forEach(x => { if (!o.length || x - o[o.length - 1] > 1e-6 * S) o.push(x); }); return o;
+    });
+    const FA = [[2, 1, 0, -1, -1, 1], [2, 1, 0, 1, -1, -1], [0, 2, 1, 1, 1, 1], [0, 2, 1, 1, -1, -1], [0, 1, 2, 1, -1, 1], [0, 1, 2, -1, -1, -1]];
+    const P = [], N = [], U = [], I = [], G = [], V = [0, 0, 0], ins = [0, 0, 0], sw = [0, 0, 0], c = [0, 0, 0], d = [0, 0, 0]; let start = 0;
+    FA.forEach((f, fi) => {
+      const ua = f[0], va = f[1], wa = f[2], xs = C[ua], ys = C[va], nu = xs.length, nv = ys.length, base = P.length / 3;
+      for (let iy = 0; iy < nv; iy++) for (let ix = 0; ix < nu; ix++) {
+        V[ua] = xs[ix] * f[3]; V[va] = ys[iy] * f[4]; V[wa] = H[wa] * f[5];
+        ins[0] = ins[1] = ins[2] = 0; sw[0] = sw[1] = sw[2] = 0;
+        for (let i = 0; i < 12; i++) { // every edge whose zone this vertex is inside pulls on the two axes it rounds; blended by how deep inside, so nothing jumps
+          const r = rE[i]; if (r <= 1e-9) continue; const e = smEdge(i), a = e[1], b = e[2];
+          const ta = (V[a] * e[3] - (H[a] - r)) / r, tb = (V[b] * e[4] - (H[b] - r)) / r; if (ta <= 1e-9 || tb <= 1e-9) continue;
+          const w = Math.sqrt(Math.min(1, ta) * Math.min(1, tb)); ins[a] += w * r; sw[a] += w; ins[b] += w * r; sw[b] += w;
+        }
+        for (let a = 0; a < 3; a++) ins[a] = sw[a] > 0 ? ins[a] / sw[a] : 0;
+        for (let a = 0; a < 3; a++) { const lim = H[a] - ins[a]; c[a] = V[a] > lim ? lim : V[a] < -lim ? -lim : V[a]; d[a] = ins[a] > 0 ? (V[a] - c[a]) / ins[a] : 0; }
+        // unit-cube -> unit-ball mapping (no folds, exact sphere on the cube surface)
+        const x2 = d[0] * d[0], y2 = d[1] * d[1], z2 = d[2] * d[2], uu = [d[0] * Math.sqrt(Math.max(0, 1 - y2 / 2 - z2 / 2 + y2 * z2 / 3)), d[1] * Math.sqrt(Math.max(0, 1 - z2 / 2 - x2 / 2 + z2 * x2 / 3)), d[2] * Math.sqrt(Math.max(0, 1 - x2 / 2 - y2 / 2 + x2 * y2 / 3))];
+        for (let a = 0; a < 3; a++) P.push(ins[a] > 0 ? c[a] + uu[a] * ins[a] : V[a]);
+        if (ins[wa] > 0) { const n = [0, 0, 0]; let nl = 0; for (let a = 0; a < 3; a++) if (ins[a] > 0) { n[a] = uu[a] / ins[a]; nl += n[a] * n[a]; } nl = Math.sqrt(nl) || 1; N.push(n[0] / nl, n[1] / nl, n[2] / nl); }
+        else { const n = [0, 0, 0]; n[wa] = f[5]; N.push(n[0], n[1], n[2]); }
+        U.push((xs[ix] + H[ua]) / (2 * H[ua]), (1 - (ys[iy] + H[va]) / (2 * H[va])) * (slab && fi !== 2 && fi !== 3 ? 0.5 : 1));
+      }
+      for (let iy = 0; iy < nv - 1; iy++) for (let ix = 0; ix < nu - 1; ix++) { const a = base + ix + nu * iy, b = base + ix + nu * (iy + 1), cc = base + ix + 1 + nu * (iy + 1), dd = base + ix + 1 + nu * iy; I.push(a, b, dd, b, cc, dd); }
+      G.push([start, I.length - start, fi]); start = I.length;
+    });
+    if (slab) for (let i = 1; i < P.length; i += 3) P[i] -= S / 4; // slab = the bottom half of its cell
+    return { P, N, U, I, G };
+  }
+  // which of the 12 edges of the block at (x,y,z) are on the outside? (both faces that meet there are open air) — edges glued to a neighbour are never touched
+  function smExposed(has, x, y, z) {
+    const out = [], u = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (let i = 0; i < 12; i++) { const e = smEdge(i), A = u[e[1]], B = u[e[2]]; out.push(!has(x + A[0] * e[3], y + A[1] * e[3], z + A[2] * e[3]) && !has(x + B[0] * e[4], y + B[1] * e[4], z + B[2] * e[4])); }
+    return out;
+  }
+  // how hard the paper presses on each edge for a contact point p (block-centre frame, world units): 0 = not touching .. 1 = right on the edge
+  function smPressure(p, S, slab, reach) {
+    const H = [S / 2, slab ? S / 4 : S / 2, S / 2], out = [];
+    for (let i = 0; i < 12; i++) {
+      const e = smEdge(i), k = e[0], dk = Math.max(0, Math.abs(p[k]) - H[k]), dist = Math.hypot(p[e[1]] - e[3] * H[e[1]], p[e[2]] - e[4] * H[e[2]], dk) / S;
+      out.push(dist >= reach ? 0 : (1 - dist / reach) * (1 - dist / reach));
+    }
+    return out;
+  }
   //#PURE-END
   const VoxelBuild = (function () {
     const KEY = 'forgeVoxelBuild_v1';
@@ -32099,7 +32181,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const W = {
       S: null, cells: new Map(), defs: new Map(), nextId: 100, inv: new Array(INV_N).fill(0), hot: [6, 1, 2, 8, 9, 10, 11, 7, 14], slot: 0,
       tool: 'place', digShape: 'square', digSize: 3, digDepth: 1, foundation: false, onGround: true,
-      sel: null, clip: null, rot: 0, mir: 0, pasteCell: null, pasteGround: true, feather: 1, show: true, pendingSlot: -1, replaceFlood: true, sandLvl: 2, sandMode: 'smooth', sandR: 0
+      sel: null, clip: null, rot: 0, mir: 0, pasteCell: null, pasteGround: true, feather: 1, show: true, pendingSlot: -1, replaceFlood: true, sandLvl: 2, sandMode: 'smooth', sandR: 0, sandGrit: 'medium'
     };
     // ---------- block catalogue ----------
     const PREMADE = [
@@ -32302,9 +32384,9 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     resetDefs();
     // ---- v14-9: shaped blocks (doors, stairs, fences, windows ...) = boxes inside one cell; facing = camera direction ----
     const VF = 1000000; // id + VF * r  =  same block turned r * 90 degrees (created on demand, never listed)
-    function ensureVariant(id) { if (!(id >= VF) || W.defs.has(id)) return; const b = W.defs.get(id % VF); if (!b) return; W.defs.set(id, { id, name: b.name, pat: b.pat, color: b.color, opacity: b.opacity, glow: b.glow, shape: b.shape, tp: b.tp, cut: b.cut, boxes: b.boxes, passable: b.passable, climb: b.climb, tog: b.tog, mate: b.mate, half: b.half, img: b.img, rot: Math.floor(id / VF) % 4, sm: b.boxes ? 0 : Math.floor(id / VF / 4), hidden: true, custom: false }); }
+    function ensureVariant(id) { if (!(id >= VF) || W.defs.has(id)) return; const b = W.defs.get(id % VF); if (!b) return; W.defs.set(id, { id, name: b.name, pat: b.pat, color: b.color, opacity: b.opacity, glow: b.glow, shape: b.shape, tp: b.tp, cut: b.cut, boxes: b.boxes, passable: b.passable, climb: b.climb, tog: b.tog, mate: b.mate, half: b.half, img: b.img, rot: Math.floor((id - id % VF) / VF) % 4, sm: b.boxes ? 0 : Math.floor((id - id % VF) / VF / 4), hidden: true, custom: false }); }
     function orientId(id, yaw) { const d = W.defs.get(id); if (!d || !d.orient || id >= VF) return id; const r = ((Math.round((yaw + Math.PI) / (Math.PI / 2)) % 4) + 4) % 4; if (!r) return id; const v = id + VF * r; ensureVariant(v); return v; }
-    function sibId(base, id) { const v = base + VF * Math.floor(id / VF); ensureVariant(v); return v; }
+    function sibId(base, id) { const v = base + VF * ((id - id % VF) / VF); ensureVariant(v); return v; }
     function mateId(id) { const d = W.defs.get(id); return d && d.mate ? sibId(d.mate, id) : 0; }
     function mateCellType(cell, t, d) { const my = cell[1] + (d.half === 'up' ? -1 : 1), mt = W.cells.get(vxKey(cell[0], my, cell[2])); return mt && d.mate && mt === sibId(d.mate, t) ? [my, mt] : null; }
     function toggleList(cell) { const t = W.cells.get(vxKey(cell[0], cell[1], cell[2])); if (!t) return null; const d = W.defs.get(t); if (!d || !d.tog) return null; const l = [[cell[0], cell[1], cell[2], sibId(d.tog, t)]], m = mateCellType(cell, t, d); if (m) { const md = W.defs.get(m[1]); if (md && md.tog) l.push([cell[0], m[0], cell[2], sibId(md.tog, m[1])]); } return l; }
@@ -32318,58 +32400,119 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeBoundingSphere(); d._geo = g; return g;
     }
 
-    // ================= v16: 🪚 SANDPAPER — rounds the edges of full blocks and slabs =================
-    // A smoothed block is just another "variant id" (id + VF * (turn + 4 * level)), exactly like a turned door. So it saves, undoes, copies, bakes and
-    // exports through the existing code with no new storage format. Level 0 = sharp, 1..4 = more and more round (4 = ball). Doors / stairs / fences are skipped.
-    const SM_MAX = 4, SM_R = [0, 0.1, 0.2, 0.32, 0.5];
+    // ================= v17: 🪚 REAL SANDPAPER — wears the EDGES you rub, a little at a time =================
+    // The maths (per-edge wear codes + the worn-block geometry) lives in the pure part above (smEncode / sandShape ...). Here: the rubbing itself.
+    //  - Rubbing only REMOVES material, only where the paper touches, and edges / corners wear first (the middle of a flat face does not change).
+    //  - Every edge has its own level 0..4, and wears one level only after enough rubbing (more rubbing for each next level; coarse grit is faster).
+    //  - Only OUTSIDE edges wear (an edge glued to a neighbouring block is never reached), so walls keep their seams and round only at the outside.
+    //  - A worn block is a "variant id" (id + VF * (turn + 4 * code)); saving, undo, copy / paste, bake and export keep working unchanged.
+    const SM_MAX = 4;
+    const SM_GRIT = { coarse: { l: 'Moti (#60)', rate: 0.6 }, medium: { l: 'Medium (#150)', rate: 0.3 }, fine: { l: 'Baareek (#400)', rate: 0.12 } };
+    const SM_T = [1, 1.6, 2.4, 3.6]; // rubbing needed to wear the NEXT level off an edge (more material to remove every time)
+    const rubP = new Map(); // wear progress of the edges being rubbed (not saved): key = cellKey * 12 + edge
+    let rubNear = false;
+    const vOf = id => (id - id % VF) / VF;
+    const smCodeOf = id => Math.floor(vOf(id) / 4);
+    const gritRate = g => (SM_GRIT[g] || SM_GRIT.medium).rate;
     function smoothable(id) { const d = W.defs.get(id); return !!d && !d.boxes && !d.mate && !d.tog; }
-    function smId(id, lvl) { const v = Math.floor(id / VF), base = id % VF, nid = base + VF * ((v % 4) + 4 * lvl); ensureVariant(nid); return nid; }
-    function roundBoxGeo(sx, sy, sz, r, seg, halfV) { // box with every edge/corner rounded to radius r; 6 material groups in BoxGeometry order (+x -x +y -y +z -z), planar UVs like BoxGeometry
-      const H = [sx / 2, sy / 2, sz / 2]; r = Math.max(0, Math.min(r, H[0], H[1], H[2]));
-      const crd = h => { if (r < 1e-6) return [-h, h]; const a = []; for (let k = 0; k <= seg; k++) a.push(-h + r * k / seg); for (let k = 0; k <= seg; k++) a.push(h - r + r * k / seg); return a.filter((v, i) => i === 0 || v - a[i - 1] > 1e-7); };
-      const C = [crd(H[0]), crd(H[1]), crd(H[2])], FA = [[2, 1, 0, -1, -1, 1], [2, 1, 0, 1, -1, -1], [0, 2, 1, 1, 1, 1], [0, 2, 1, 1, -1, -1], [0, 1, 2, 1, -1, 1], [0, 1, 2, -1, -1, -1]];
-      const P = [], N = [], U = [], I = [], inn = H.map(h => h - r), V = [0, 0, 0], g = new THREE.BufferGeometry(); let start = 0;
-      FA.forEach((f, fi) => {
-        const ua = f[0], va = f[1], wa = f[2], xs = C[ua], ys = C[va], nu = xs.length, nv = ys.length, base = P.length / 3;
-        for (let iy = 0; iy < nv; iy++) for (let ix = 0; ix < nu; ix++) {
-          V[ua] = xs[ix] * f[3]; V[va] = ys[iy] * f[4]; V[wa] = H[wa] * f[5];
-          const cx = Math.max(-inn[0], Math.min(inn[0], V[0])), cy = Math.max(-inn[1], Math.min(inn[1], V[1])), cz = Math.max(-inn[2], Math.min(inn[2], V[2]));
-          let dx = V[0] - cx, dy = V[1] - cy, dz = V[2] - cz; const l = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          if (r > 1e-6 && l > 1e-7) { dx /= l; dy /= l; dz /= l; P.push(cx + dx * r, cy + dy * r, cz + dz * r); N.push(dx, dy, dz); }
-          else { P.push(V[0], V[1], V[2]); const nn = [0, 0, 0]; nn[wa] = f[5]; N.push(nn[0], nn[1], nn[2]); }
-          U.push((xs[ix] + H[ua]) / (2 * H[ua]), (1 - (ys[iy] + H[va]) / (2 * H[va])) * (halfV && fi !== 2 && fi !== 3 ? 0.5 : 1));
-        }
-        for (let iy = 0; iy < nv - 1; iy++) for (let ix = 0; ix < nu - 1; ix++) { const a = base + ix + nu * iy, b = base + ix + nu * (iy + 1), c = base + ix + 1 + nu * (iy + 1), d = base + ix + 1 + nu * iy; I.push(a, b, d, b, c, d); }
-        g.addGroup(start, I.length - start, fi); start = I.length;
-      });
-      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setIndex(I); return g;
-    }
+    function smIdOf(id, code) { const nid = id % VF + VF * ((vOf(id) % 4) + 4 * code); ensureVariant(nid); return nid; }
+    function smTurnId(id, r, mir) { if (!id || id < VF) return id; const c = smCodeOf(id), c2 = smTurn(c, r, mir); return c2 === c ? id : smIdOf(id, c2); }
     function smGeo(d) {
-      if (d._geo) return d._geo; const S = W.S, slab = d.shape === 'slab', sy = slab ? S / 2 : S, r = Math.min(SM_R[Math.min(SM_MAX, d.sm || 0)] * S, S / 2, sy / 2);
-      const g = roundBoxGeo(S, sy, S, r, (d.sm || 0) <= 2 ? 2 : d.sm === 3 ? 3 : 4, slab); if (slab) g.translate(0, -S / 4, 0); g.computeBoundingSphere(); d._geo = g; return g;
+      if (d._geo) return d._geo; const s = sandShape(W.S, d.shape === 'slab', smDecode(d.sm || 0)), g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(s.P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(s.N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(s.U, 2)); g.setIndex(s.I);
+      s.G.forEach(q => g.addGroup(q[0], q[1], q[2])); g.computeBoundingSphere(); d._geo = g; return g;
     }
-    // list of [x,y,z,newId] for a brush around `cell` (R = radius in blocks, 0 = one block). mode 'sharp' puts the sharp edge back.
-    function sandList(cell, R, lvl, mode) {
-      const out = [], L = mode === 'sharp' ? 0 : Math.max(1, Math.min(SM_MAX, lvl | 0)), r = Math.max(0, Math.min(4, R | 0));
+    // One rub of the paper at world point `pt` (on block `cell`). R = brush (0 = one block). rate = grit speed. Returns [[x,y,z,newId]] for blocks that lost a level on some edge.
+    function rubList(pt, cell, R, rate) {
+      rubNear = false; if (rubP.size > 20000) rubP.clear();
+      const S = W.S, r = Math.max(0, Math.min(3, R | 0)), reach = 0.34 + 0.26 * r, out = [], has = (x, y, z) => W.cells.has(vxKey(x, y, z));
       for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
         if (r > 0 && dx * dx + dy * dy + dz * dz > r * r + 0.5) continue;
-        const x = cell[0] + dx, y = cell[1] + dy, z = cell[2] + dz, t = W.cells.get(vxKey(x, y, z)); if (!t || !smoothable(t)) continue;
-        const nid = smId(t, L); if (nid !== t) out.push([x, y, z, nid]);
+        const x = cell[0] + dx, y = cell[1] + dy, z = cell[2] + dz, k = vxKey(x, y, z), t = W.cells.get(k); if (!t || !smoothable(t)) continue;
+        const slab = W.defs.get(t).shape === 'slab', pr = smPressure([pt.x - (x + 0.5) * S, pt.y - (y + (slab ? 0.25 : 0.5)) * S, pt.z - (z + 0.5) * S], S, slab, reach);
+        if (!pr.some(v => v > 0)) continue;
+        const ex = smExposed(has, x, y, z), L = smDecode(smCodeOf(t)); let ch = false;
+        for (let i = 0; i < 12; i++) {
+          if (!pr[i] || !ex[i] || L[i] >= SM_MAX) continue; rubNear = true;
+          const pk = k * 12 + i; let p = (rubP.get(pk) || 0) + rate * pr[i];
+          while (L[i] < SM_MAX && p >= SM_T[L[i]]) { p -= SM_T[L[i]]; L[i]++; ch = true; }
+          if (L[i] >= SM_MAX) rubP.delete(pk); else rubP.set(pk, p);
+        }
+        if (ch) { const nid = smIdOf(t, smEncode(L)); if (nid !== t) out.push([x, y, z, nid]); }
       }
       return out;
     }
-    function doSand(h) {
-      if (h.kind !== 'voxel') { toast('Kisi bane hue block par tap karo — 🪚 sandpaper sirf blocks par chalta hai', 1800); return; }
-      const t = W.cells.get(vxKey(h.cell[0], h.cell[1], h.cell[2])), list = sandList(h.cell, W.sandR, W.sandLvl, W.sandMode);
-      if (!list.length) { toast(t && !smoothable(t) ? 'Ye block (darwaza / seedhi / fence) smooth nahi hota' : (W.sandMode === 'sharp' ? 'Ye pehle se tez kinare wala hai' : 'Ye pehle se itna smooth hai'), 1500); return; }
-      const ch = Chg(); list.forEach(q => ch.set(q, q[3])); if (commit('sandpaper', ch)) haptic(HAPTIC.tick);
+    // "Reset" = put the sharp edges back on the blocks in the brush (real paper cannot do this — it is a builder's cheat; undo also works)
+    function sandResetList(cell, R) {
+      const r = Math.max(0, Math.min(3, R | 0)), out = [];
+      for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
+        if (r > 0 && dx * dx + dy * dy + dz * dz > r * r + 0.5) continue;
+        const x = cell[0] + dx, y = cell[1] + dy, z = cell[2] + dz, k = vxKey(x, y, z), t = W.cells.get(k); if (!t || !smoothable(t) || !(smCodeOf(t) > 0)) continue;
+        for (let i = 0; i < 12; i++) rubP.delete(k * 12 + i); const nid = smIdOf(t, 0); if (nid !== t) out.push([x, y, z, nid]);
+      }
+      return out;
     }
+    // a little dust while rubbing (looks only)
+    const dust = { n: 40, i: 0, run: false, pts: null, mat: null, pos: null, vel: null, life: null, t0: 0 };
+    function dustInit() {
+      if (dust.pts) return; const n = dust.n; dust.pos = new Float32Array(n * 3); dust.vel = new Float32Array(n * 3); dust.life = new Float32Array(n); for (let j = 0; j < n; j++) dust.pos[j * 3 + 1] = -1e5;
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(dust.pos, 3)); dust.mat = new THREE.PointsMaterial({ size: Math.max(0.004, (W.S || 1) * 0.07), color: 0xd8c9a8, transparent: true, opacity: 0.85, depthWrite: false });
+      dust.pts = new THREE.Points(g, dust.mat); dust.pts.frustumCulled = false; dust.pts.renderOrder = 5; group.add(dust.pts);
+    }
+    function dustAt(p, cell) {
+      try {
+        dustInit(); const S = W.S || 1, d = W.defs.get(W.cells.get(vxKey(cell[0], cell[1], cell[2])) || 0); if (d && d.color) { dust.mat.color.set(d.color); dust.mat.color.lerp(new THREE.Color(0xffffff), 0.35); }
+        for (let q = 0; q < 3; q++) { const j = dust.i = (dust.i + 1) % dust.n; dust.pos[j * 3] = p.x; dust.pos[j * 3 + 1] = p.y; dust.pos[j * 3 + 2] = p.z; dust.vel[j * 3] = (Math.random() - 0.5) * S * 0.9; dust.vel[j * 3 + 1] = S * (0.2 + Math.random() * 0.7); dust.vel[j * 3 + 2] = (Math.random() - 0.5) * S * 0.9; dust.life[j] = 0.4 + Math.random() * 0.35; }
+        if (!dust.run) { dust.run = true; dust.t0 = performance.now(); requestAnimationFrame(dustStep); }
+      } catch (e) { }
+    }
+    function dustStep(now) {
+      const dt = Math.min(0.05, Math.max(0, (now - dust.t0) / 1000)), S = W.S || 1; dust.t0 = now; let alive = false;
+      for (let j = 0; j < dust.n; j++) {
+        if (dust.life[j] <= 0) continue; dust.life[j] -= dt; if (dust.life[j] <= 0) { dust.pos[j * 3 + 1] = -1e5; continue; } alive = true;
+        dust.vel[j * 3 + 1] -= S * 2.4 * dt; for (let a = 0; a < 3; a++) dust.pos[j * 3 + a] += dust.vel[j * 3 + a] * dt;
+      }
+      dust.pts.geometry.attributes.position.needsUpdate = true; requestRender(); if (alive) requestAnimationFrame(dustStep); else dust.run = false;
+    }
+    // ---- the rubbing stroke (Build tab): hold the finger on a block and move it; every ~80 ms the paper rubs where the finger is ----
+    let rub = null, rubTimer = 0;
+    function rubStart(e) {
+      rub = { id: e.pointerId, cx: e.clientX, cy: e.clientY, t: 0, all: new Map(), tried: 0, hit: 0, near: 0, worn: 0 };
+      rubTimer = setInterval(() => rubTick(false), 80); rubTick(true);
+    }
+    function rubTick(force) {
+      if (!rub) return; const now = performance.now(); if (!force && now - rub.t < 60) return; rub.t = now; rub.tried++;
+      const h = pickAt({ clientX: rub.cx, clientY: rub.cy }); if (!h || h.kind !== 'voxel') return; rub.hit++;
+      const reset = W.sandMode === 'reset', list = reset ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit));
+      if (!reset && rubNear) { rub.near++; dustAt(h.point, h.cell); } if (!list.length) return;
+      const m = new Map(); list.forEach(q => { const k = vxKey(q[0], q[1], q[2]), cur = W.cells.get(k) || 0; if (cur === q[3]) return; m.set(k, [cur, q[3]]); const a = rub.all.get(k); if (a) a[1] = q[3]; else rub.all.set(k, [cur, q[3]]); });
+      if (m.size) { applyCh(m, false); rub.worn += m.size; haptic(HAPTIC.tick); }
+    }
+    function rubEnd() {
+      if (!rub) return; clearInterval(rubTimer); const r = rub; rub = null;
+      if (r.all.size) { const m = r.all; pushObjHistory({ label: 'sandpaper', undo: () => { applyCh(m, true); refreshTab(); }, redo: () => { applyCh(m, false); refreshTab(); } }); return; }
+      if (!r.hit) toast('Block par ungli rakh kar ghiso — ground par sandpaper kaam nahi karta', 1800);
+      else if (W.sandMode === 'reset') toast('Is block par ghisa hua kuch nahi tha', 1400);
+      else if (!r.near) toast('Kinare ya kone ke paas ghiso — face ke beech mein ghisne se block nahi ghista', 2600);
+      else toast('Thoda aur ghiso 🪚 — kinara dheere dheere ghista hai (Moti kaagaz tez hai)', 2200);
+    }
+    function doSand(h) { // not used for drag, kept so the old tap dispatch table still works: one short rub
+      if (h.kind !== 'voxel') { toast('Kisi bane hue block par ghiso — 🪚 sandpaper sirf blocks par chalta hai', 1800); return; }
+      const ch = Chg(); let list = []; for (let q = 0; q < 4; q++) list = list.concat(W.sandMode === 'reset' ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit)));
+      list.forEach(q => ch.set(q, q[3])); if (commit('sandpaper', ch)) haptic(HAPTIC.tick);
+    }
+    // whole selected area in one go: raise every OUTSIDE edge of every block to level N (never softens a worn edge); reset mode = all sharp again
     function sandSelection() {
       const b = selBounds(); if (!b) { toast('Pehle ▭ Select se area chuno', 1500); return; }
-      const L = W.sandMode === 'sharp' ? 0 : Math.max(1, Math.min(SM_MAX, W.sandLvl | 0)), ch = Chg(), tmp = [0, 0, 0]; let n = 0;
-      W.cells.forEach((t, k) => { vxDec(k, tmp); if (tmp[0] < b.x0 || tmp[0] > b.x1 || tmp[2] < b.z0 || tmp[2] > b.z1 || tmp[1] < b.y0 || tmp[1] > b.y1 || !smoothable(t)) return; const nid = smId(t, L); if (nid !== t) { ch.set([tmp[0], tmp[1], tmp[2]], nid); n++; } });
-      if (!n) { toast('Is area mein badalne layak block nahi mila', 1600); return; }
-      if (commit('sandpaper area', ch)) { haptic(HAPTIC.tick); toast('🪚 ' + n + ' blocks ' + (L ? 'smooth' : 'tez kinare wale') + ' ho gaye', 1800); }
+      const reset = W.sandMode === 'reset', T = reset ? 0 : Math.max(1, Math.min(SM_MAX, W.sandLvl | 0)), ch = Chg(), tmp = [0, 0, 0], has = (x, y, z) => W.cells.has(vxKey(x, y, z)); let n = 0;
+      W.cells.forEach((t, k) => {
+        vxDec(k, tmp); if (tmp[0] < b.x0 || tmp[0] > b.x1 || tmp[2] < b.z0 || tmp[2] > b.z1 || tmp[1] < b.y0 || tmp[1] > b.y1 || !smoothable(t)) return;
+        const L = smDecode(smCodeOf(t)); let c2 = false;
+        if (reset) { for (let i = 0; i < 12; i++) if (L[i]) { L[i] = 0; c2 = true; } } else { const ex = smExposed(has, tmp[0], tmp[1], tmp[2]); for (let i = 0; i < 12; i++) if (ex[i] && L[i] < T) { L[i] = T; c2 = true; } }
+        if (!c2) return; const nid = smIdOf(t, smEncode(L)); if (nid !== t) { ch.set([tmp[0], tmp[1], tmp[2]], nid); n++; }
+      });
+      if (!n) { toast('Is area mein ghisne layak kinara nahi mila', 1600); return; }
+      if (commit('sandpaper area', ch)) { haptic(HAPTIC.tick); toast('🪚 ' + n + ' blocks ' + (reset ? 'wapas tez kinare wale' : 'ke bahar ke kinare ghis gaye'), 1800); }
     }
     function defaultInv() { const a = new Array(INV_N).fill(0), vis = PREMADE.filter(p => !p.hidden); for (let i = 0; i < vis.length && i < INV_N; i++) a[i] = vis[i].id; return a; }
     function normalizeInv(catV) {
@@ -32851,7 +32994,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const c = W.clip, o = pasteOrigin(); if (!c || !o || W.tool !== 'paste') { requestRender(); return; }
       const S = W.S, [w, h, d] = clipDims(); pasteGhost = new THREE.Group();
       const occ = new Map();
-      for (let i = 0; i < c.blocks.length; i += 4) { const [x, z] = vxXf(c.blocks[i], c.blocks[i + 2], c.w, c.d, W.rot, W.mir); occ.set(vxKey(x, c.blocks[i + 1], z), c.blocks[i + 3]); }
+      for (let i = 0; i < c.blocks.length; i += 4) { const [x, z] = vxXf(c.blocks[i], c.blocks[i + 2], c.w, c.d, W.rot, W.mir); occ.set(vxKey(x, c.blocks[i + 1], z), smTurnId(c.blocks[i + 3], W.rot, W.mir)); }
       const list = []; occ.forEach((t, k) => { const q = vxDec(k, [0, 0, 0]); const x = q[0], y = q[1], z = q[2]; if (occ.has(vxKey(x + 1, y, z)) && occ.has(vxKey(x - 1, y, z)) && occ.has(vxKey(x, y + 1, z)) && occ.has(vxKey(x, y - 1, z)) && occ.has(vxKey(x, y, z + 1)) && occ.has(vxKey(x, y, z - 1))) return; list.push([x, y, z, t]); });
       if (list.length && list.length < 12000) {
         const im = new THREE.InstancedMesh(new THREE.BoxGeometry(S, S, S), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false }), list.length), m4 = new THREE.Matrix4(), col = new THREE.Color();
@@ -32861,7 +33004,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       pasteGhost.position.set(o[0] * S, o[1] * S, o[2] * S); group.add(pasteGhost); requestRender();
     }
     // ---------- tools ----------
-    const toolIsCamera = () => W.tool !== 'dig' && W.tool !== 'fill';
+    const toolIsCamera = () => W.tool !== 'dig' && W.tool !== 'fill' && W.tool !== 'sand'; // these tools are drag strokes (use the Orbit button to move the camera)
     function applyCam() { controls.enabled = orbitOverride || toolIsCamera(); if (controls.enabled && !orbitOverride) { try { applyCameraModeFlags('orbit'); } catch (e) { } } }
     function curDef() { return W.defs.get(W.hot[W.slot]) || null; }
     function doPlace(h) {
@@ -32954,7 +33097,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         else { const after = snapshotCurrentTerrain(); extra = { undo: () => restoreTerrainSnapshot(before), redo: () => restoreTerrainSnapshot(after) }; }
       }
       const colMin = new Map();
-      for (let i = 0; i < c.blocks.length; i += 4) { const q = vxXf(c.blocks[i], c.blocks[i + 2], c.w, c.d, W.rot, W.mir), cell = [o[0] + q[0], o[1] + c.blocks[i + 1], o[2] + q[1]]; ch.set(cell, c.blocks[i + 3]); const ck2 = q[0] * 100000 + q[1]; if (!colMin.has(ck2) || colMin.get(ck2)[1] > cell[1]) colMin.set(ck2, [cell, cell[1], c.blocks[i + 3]]); }
+      for (let i = 0; i < c.blocks.length; i += 4) { const q = vxXf(c.blocks[i], c.blocks[i + 2], c.w, c.d, W.rot, W.mir), cell = [o[0] + q[0], o[1] + c.blocks[i + 1], o[2] + q[1]]; ch.set(cell, smTurnId(c.blocks[i + 3], W.rot, W.mir)); const ck2 = q[0] * 100000 + q[1]; if (!colMin.has(ck2) || colMin.get(ck2)[1] > cell[1]) colMin.set(ck2, [cell, cell[1], c.blocks[i + 3]]); }
       if (W.foundation && !(W.pasteGround && c.ground)) { const g = gridInfo(); colMin.forEach(v => { const cell = v[0], x0 = cell[0] * S, z0 = cell[2] * S, gm = Math.min(groundY(x0 + S * 0.1, z0 + S * 0.1, g), groundY(x0 + S * 0.9, z0 + S * 0.9, g), groundY(x0 + S / 2, z0 + S / 2, g)); for (let y = cell[1] - 1, n = 0; n < 60 && (y + 1) * S > gm + 1e-3; y--, n++) { const cc = [cell[0], y, cell[2]]; if (!ch.get(cc)) ch.set(cc, v[2]); } }); }
       if (commit('paste', ch, extra)) { haptic(HAPTIC.success); toast('✅ Paste ho gaya', 1400); }
     }
@@ -32997,18 +33140,19 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const active = () => workspace === 'terrain' && terrainMode === 'voxel' && !orbitOverride && !!terrainRoot;
     el.addEventListener('pointerdown', e => {
       if (!active()) return; ptrs.set(e.pointerId, 1);
-      if (ptrs.size > 1) { tap = null; if (stroke) strokeEnd(); return; }
-      if (!toolIsCamera()) strokeStart(e); else tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+      if (ptrs.size > 1) { tap = null; if (stroke) strokeEnd(); if (rub) rubEnd(); return; }
+      if (!toolIsCamera()) { if (W.tool === 'sand') rubStart(e); else strokeStart(e); } else tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     });
     el.addEventListener('pointermove', e => {
       if (!active()) return;
       if (tap && e.pointerId === tap.id && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 9) tap = null;
       if (stroke && e.pointerId === stroke.id) { strokeMove(e); return; }
+      if (rub && e.pointerId === rub.id) { rub.cx = e.clientX; rub.cy = e.clientY; rubTick(false); return; }
       if (e.pointerType === 'mouse' && !ptrs.size && performance.now() - lastHover > 110 && (W.tool === 'place' || W.tool === 'paste')) { lastHover = performance.now(); const h = pickAt(e); if (!h) { hideGhost(); return; } if (W.tool === 'place') { const d = curDef(); showGhost(placeCellOf(h, null), d && d.shape === 'slab'); } }
     });
     function pup(e) {
       const wasTap = tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < 650; const t = tap; if (t && t.id === e.pointerId) tap = null;
-      if (stroke && stroke.id === e.pointerId) strokeEnd(); const had = ptrs.delete(e.pointerId);
+      if (stroke && stroke.id === e.pointerId) strokeEnd(); if (rub && rub.id === e.pointerId) rubEnd(); const had = ptrs.delete(e.pointerId);
       if (wasTap && had && active() && ptrs.size === 0) { const h = pickAt(e); if (!h) { toast('Ground ya block par tap karo', 1200); return; } ({ place: doPlace, break: doBreak, pick: doPick, replace: doReplace, sand: doSand, select: doSelect, paste: doPasteAim })[W.tool](h); }
     }
     el.addEventListener('pointerup', pup); el.addEventListener('pointercancel', e => { tap = null; pup(e); }); window.addEventListener('pointerup', e => { if (ptrs.has(e.pointerId) && e.target !== el) pup(e); });
@@ -33105,12 +33249,18 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       else if (W.tool === 'pick') { section('🧪 Pick'); note('Kisi bane hue block par tap karo — wahi block hotbar mein aa jayega.'); }
       else if (W.tool === 'replace') { section('🖌 Block badlo'); note('Kisi bane hue block par tap karo — wo block hotbar ke chune hue block se badal jayega. Undo kaam karta hai.'); toggleRow('Jude hue sab same blocks badlo (off = sirf ek block)', W.replaceFlood, v => { W.replaceFlood = v; }); }
       else if (W.tool === 'sand') {
-        section('🪚 Sandpaper — kinare gol / smooth karo');
-        note('Block par tap karo — uske kinare gol ho jayenge, jaise sandpaper ghisa ho. Apne man ka design banao: Halka se Gol tak 4 level. Undo kaam karta hai. Ye Armor Forge ke Smooth jaisa hi hai.');
-        const lr = rowEl(true); [[1, 'Halka'], [2, 'Medium'], [3, 'Zyada'], [4, 'Gol']].forEach(([n, l]) => lr.appendChild(btn(l, () => { W.sandLvl = n; W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode === 'smooth' && W.sandLvl === n)));
-        const mr = rowEl(true); mr.appendChild(btn('◽ Wapas tez kinara (sharp)', () => { W.sandMode = 'sharp'; buildTerrainDock(); }, W.sandMode === 'sharp'));
+        section('🪚 Sandpaper — asli ghisai');
+        note('Ungli block ke KINARE ya KONE ke paas rakh kar ghiso (ungli hilate raho, jaise kaagaz ghiste hain). Asli sandpaper ki tarah: kinare aur kone pehle ghisate hain, face ke beech mein kuch nahi hota; jitna zyada ghisoge utna zyada gol (4 level). Ye sirf ghista hai — material hatata hai. Sirf BAHAR ke kinare ghisate hain; jude hue blocks ki seam wahi rehti hai. Ek kinara ghiso to sirf wahi gol hota hai (jaise khamba / gumbad / mehraab banane ke liye). Undo kaam karta hai. Camera ghumana ho to Orbit button dabao.');
+        section('Kaagaz (grit)');
+        const gr = rowEl(true); Object.keys(SM_GRIT).forEach(g => gr.appendChild(btn(SM_GRIT[g].l, () => { W.sandGrit = g; W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode === 'smooth' && W.sandGrit === g)));
+        section('Brush');
         const br = rowEl(true); [[0, '1 block'], [1, '3×3'], [2, '5×5'], [3, '7×7']].forEach(([n, l]) => br.appendChild(btn(l, () => { W.sandR = n; buildTerrainDock(); }, W.sandR === n)));
-        if (selBounds()) { const sr = rowEl(true); sr.appendChild(btn('▭ Select kiya poora area ' + (W.sandMode === 'sharp' ? 'tez karo' : 'smooth karo'), sandSelection, true)); } else note('Poora area ek saath karna ho to pehle ▭ Select se area chuno, phir yahan wapas aao.');
+        const mr = rowEl(true); mr.appendChild(btn('↩ Reset: ghisa hua wapas tez kinara (builder ki cheat)', () => { W.sandMode = W.sandMode === 'reset' ? 'smooth' : 'reset'; buildTerrainDock(); }, W.sandMode === 'reset'));
+        if (selBounds()) {
+          section('▭ Select kiya poora area ek saath');
+          const lr = rowEl(true); [[1, 'Halka'], [2, 'Medium'], [3, 'Zyada'], [4, 'Gol']].forEach(([n, l]) => lr.appendChild(btn(l, () => { W.sandLvl = n; if (W.sandMode === 'reset') W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode !== 'reset' && W.sandLvl === n)));
+          const sr = rowEl(true); sr.appendChild(btn(W.sandMode === 'reset' ? '▭ Select area wapas tez karo' : '▭ Poore area ke bahar ke kinare ghiso', sandSelection, true));
+        } else note('Poori imaarat / deewar ek saath ghisni ho to pehle ▭ Select se area chuno, phir yahan wapas aao.');
       }
       else if (W.tool === 'dig' || W.tool === 'fill') {
         section(W.tool === 'dig' ? '🕳 Ground mein gadda' : '⛰ Ground bharo / uthao');
@@ -33205,7 +33355,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     function tick() { const vis = !!(terrainRoot && terrainRoot.parent && workspace === 'terrain' && W.show); if (group.visible !== vis) { group.visible = vis; requestRender(); } }
     window.__forgeVoxelTick = tick;
     function onMode(m) { if (m === 'voxel') { try { if (window.ForgeTerrainGame && !window.ForgeTerrainGame.noAuto && autoOpenOn()) setTimeout(() => { try { window.ForgeTerrainGame.open(); } catch (e) { console.error('Terrain Game open failed', e); } }, 150); } catch (e) { } applyCam(); updateSelBox(); buildPasteGhost(); } else { if (stroke) strokeEnd(); hideGhost(); selBox.visible = selFill.visible = false; if (pasteGhost) { group.remove(pasteGhost); pasteGhost = null; } requestRender(); } }
-    return { buildTab, sizeUI, setBlockSize, getBlockSize: () => ensureS(), onMode, tick, serialize, load, cameraOn: toolIsCamera, applyCam, _w: W, _t: { orient: orientId, sandList, smoothable, SM_MAX, toggleList, breakList, mateId, normalizeInv, setHot, doReplace, INV_N, PREMADE, digAt, gridInfo, groundY, groundEdit, bake, ensureS, vxInRange, applyCh, env: { scene, renderer, toast, requestRender, workspace: () => workspace, size: () => (typeof TERRAIN_SIZE === 'number' && TERRAIN_SIZE > 0 ? TERRAIN_SIZE : 16), groundMeshes, key: vxKey, dda: vxDDA, defCanvas, scheduleSave } } };
+    return { buildTab, sizeUI, setBlockSize, getBlockSize: () => ensureS(), onMode, tick, serialize, load, cameraOn: toolIsCamera, applyCam, _w: W, _t: { orient: orientId, rubList, sandResetList, rubWasNear: () => rubNear, gritRate, smoothable, SM_MAX, SM_GRIT, toggleList, breakList, mateId, normalizeInv, setHot, doReplace, INV_N, PREMADE, digAt, gridInfo, groundY, groundEdit, bake, ensureS, vxInRange, applyCh, env: { scene, renderer, toast, requestRender, workspace: () => workspace, size: () => (typeof TERRAIN_SIZE === 'number' && TERRAIN_SIZE > 0 ? TERRAIN_SIZE : 16), groundMeshes, key: vxKey, dda: vxDDA, defCanvas, scheduleSave } } };
   })();
   window.VoxelBuild = VoxelBuild;
   function buildVoxelTab() { if (terrainMode !== 'voxel') { setTerrainMode('voxel'); return; } VoxelBuild.buildTab(); } // opened via Tool Hub / saved tab → switch mode first (setTerrainMode rebuilds the dock itself)
@@ -37379,7 +37529,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         if (g) { for (let t = 0.1; t < Math.min(REACH, tv); t += Math.max(0.04, S * 0.25)) { const px = eye.x + fwd.x * t, py = eye.y + fwd.y * t, pz = eye.z + fwd.z * t; if (py <= T.groundY(px, pz, g)) { tg = t; break; } } }
         else { gr.set(eye, fwd); gr.far = REACH; const h = gr.intersectObjects(E.groundMeshes(), false); if (h.length) tg = h[0].distance; gr.far = Infinity; }
         if (tv === Infinity && tg === Infinity) return null;
-        if (tv <= tg) return { kind: 'v', cell: vh.cell, place: [vh.cell[0] + vh.n[0], vh.cell[1] + vh.n[1], vh.cell[2] + vh.n[2]] };
+        if (tv <= tg) return { kind: 'v', cell: vh.cell, point: { x: eye.x + fwd.x * vh.t, y: eye.y + fwd.y * vh.t, z: eye.z + fwd.z * vh.t }, place: [vh.cell[0] + vh.n[0], vh.cell[1] + vh.n[1], vh.cell[2] + vh.n[2]] };
         const bx = eye.x + fwd.x * (tg - 0.01), by = eye.y + fwd.y * (tg - 0.01), bz = eye.z + fwd.z * (tg - 0.01), gx = Math.floor(bx / S), gz = Math.floor(bz / S); return { kind: 'g', gp: [eye.x + fwd.x * tg, eye.z + fwd.z * tg], place: [gx, liftCell(gx, gz, Math.floor(by / S)), gz] };
       }
       function edit(list, label) { const m = new Map(); list.forEach(([x, y, z, t]) => { const k = E.key(x, y, z), old = W.cells.get(k) || 0; if (old === t) return; if (m.has(k)) m.get(k)[1] = t; else m.set(k, [old, t]); }); if (!m.size) return false; T.applyCh(m, false); st.hist.push(m); if (st.hist.length > 300) st.hist.shift(); st.fut.length = 0; return true; }
@@ -37431,21 +37581,25 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const modeBtn = mkBtn('🧱', sq + 'right:10px;top:max(64px,calc(env(safe-area-inset-top) + 64px));', () => setMode(st.mode === 'free' ? 'grid' : 'free'));
       mkBtn('🛠', sq + 'right:64px;top:max(64px,calc(env(safe-area-inset-top) + 64px));', () => openEd());
       mkBtn('🎯', 'right:18px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', () => pcSelect());
-      // ---- 🪚 SANDPAPER (v16): same smoothing as the Build tab. Crosshair on a block, tap (or hold) = edges get rounded; ⚙ = level / brush ----
-      function doSand() { const a = aim(); if (!a) return; if (a.kind !== 'v') { E.toast('Crosshair block par rakho — 🪚 sandpaper blocks par chalta hai', 1500); return; } const l = T.sandList(a.cell, W.sandR, W.sandLvl, W.sandMode); if (!l.length) { E.toast(W.sandMode === 'sharp' ? 'Pehle se tez kinara' : 'Pehle se itna smooth (ya ye block smooth nahi hota)', 900); return; } edit(l); }
+      // ---- 🪚 SANDPAPER (v17): real rubbing. Crosshair near an edge / corner of a block, hold 🪚 = that edge wears down a little at a time; ⚙ = paper grit / brush ----
+      function doSand() {
+        const a = aim(); if (!a) return; if (a.kind !== 'v') { E.toast('Crosshair block ke kinare par rakho — 🪚 sandpaper blocks par chalta hai', 1500); return; }
+        const reset = W.sandMode === 'reset', l = reset ? T.sandResetList(a.cell, W.sandR) : T.rubList(a.point, a.cell, W.sandR, T.gritRate(W.sandGrit));
+        if (!l.length) { if (reset) E.toast('Pehle se tez kinara', 900); else if (!T.rubWasNear()) E.toast('Kinare / kone ke paas crosshair rakho — face ke beech mein nahi ghista', 1100); return; } edit(l);
+      }
       function openSand() {
         if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('🪚 Sandpaper'); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } };
         const row = () => { const r = el('div', 'display:flex;gap:6px;margin:6px 0;flex-wrap:wrap'); c.appendChild(r); return r; };
         const chip = (r, t, on, f) => { const b = el('div', 'padding:8px 12px;border-radius:8px;text-align:center;flex:1;min-width:64px;background:' + (on ? '#4a5bff' : '#2a3150'), t); b.onpointerdown = e => { e.stopPropagation(); f(); m.remove(); st.menu = st.inv = false; openSand(); }; r.appendChild(b); };
-        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Block par crosshair rakho aur 🪚 dabao (dabaye rakho = aage badhte hue ghisna). Kinare gol ho jaate hain.'));
-        c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Kitna smooth'));
-        { const r = row(); [[1, 'Halka'], [2, 'Medium'], [3, 'Zyada'], [4, 'Gol']].forEach(([n, l]) => chip(r, l, W.sandMode === 'smooth' && W.sandLvl === n, () => { W.sandLvl = n; W.sandMode = 'smooth'; })); }
-        { const r = row(); chip(r, '◽ Wapas tez kinara (sharp)', W.sandMode === 'sharp', () => { W.sandMode = 'sharp'; }); }
+        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block ke KINARE ya KONE ke paas rakho aur 🪚 dabaye rakho — kinara dheere dheere gol hota hai (asli sandpaper jaisa). Face ke beech mein kuch nahi hota. Sirf bahar ke kinare ghisate hain.'));
+        c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Kaagaz (grit)'));
+        { const r = row(); Object.keys(T.SM_GRIT).forEach(g => chip(r, T.SM_GRIT[g].l, W.sandMode === 'smooth' && W.sandGrit === g, () => { W.sandGrit = g; W.sandMode = 'smooth'; })); }
+        { const r = row(); chip(r, '↩ Reset: ghisa hua wapas tez kinara', W.sandMode === 'reset', () => { W.sandMode = W.sandMode === 'reset' ? 'smooth' : 'reset'; }); }
         c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Brush'));
         { const r = row(); [[0, '1 block'], [1, '3×3'], [2, '5×5'], [3, '7×7']].forEach(([n, l]) => chip(r, l, W.sandR === n, () => { W.sandR = n; })); }
         const cl = el('div', 'padding:10px;border-radius:8px;text-align:center;background:#2a3150;margin-top:10px', 'Band karo'); cl.onpointerdown = e => { e.stopPropagation(); m.remove(); st.menu = st.inv = false; }; c.appendChild(cl);
       }
-      mkBtn('🪚', 'right:84px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doSand, () => 260);
+      mkBtn('🪚', 'right:84px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doSand, () => 90);
       mkBtn('⚙', 'right:150px;bottom:calc(244px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openSand());
       // ---- 📏 SIZE PANEL: dig size / depth / shape + block size (v13-6) ----
       if (!W._gameDig) { W._gameDig = 1; W.digSize = 1; W.digDepth = 1; } // first time: small hole (1 block) instead of the big Build-tab default
