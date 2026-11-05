@@ -32173,6 +32173,92 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     }
     return out;
   }
+  // ===== v20 SUB-BLOCK CUTS (Chisel & Bits style) — pure part (no THREE). Every block can be carved at 8x8x8 resolution. =====
+  // A carved block keeps its material; its SHAPE is a 512-bit occupancy grid stored in a registry (hex string per shape) and the block id just points
+  // into that registry (id + VF * 4 * (CUT_BASE + index)), so save / undo / copy / bake / export keep working exactly like the old wear codes.
+  const CN = 8, CN3 = 512;
+  function ocFull() { return new Uint8Array(CN3).fill(1); }
+  function ocSlab() { const o = new Uint8Array(CN3); for (let z = 0; z < CN; z++) for (let y = 0; y < CN / 2; y++) for (let x = 0; x < CN; x++) o[x + CN * (y + CN * z)] = 1; return o; }
+  function ocCount(o) { let n = 0; for (let i = 0; i < CN3; i++) n += o[i]; return n; }
+  function ocEq(a, b) { for (let i = 0; i < CN3; i++) if (a[i] !== b[i]) return false; return true; }
+  function ocHex(o) { let s = ''; for (let i = 0; i < CN3; i += 4) s += (o[i] | (o[i + 1] << 1) | (o[i + 2] << 2) | (o[i + 3] << 3)).toString(16); return s; }
+  function ocFromHex(s) {
+    if (typeof s !== 'string' || s.length !== CN3 / 4) return null; const o = new Uint8Array(CN3);
+    for (let i = 0; i < s.length; i++) { const v = parseInt(s[i], 16); if (!(v >= 0 && v < 16)) return null; o[i * 4] = v & 1; o[i * 4 + 1] = (v >> 1) & 1; o[i * 4 + 2] = (v >> 2) & 1; o[i * 4 + 3] = (v >> 3) & 1; }
+    return o;
+  }
+  const ocAt = (o, x, y, z) => (x < 0 || y < 0 || z < 0 || x >= CN || y >= CN || z >= CN) ? 0 : o[x + CN * (y + CN * z)];
+  // merge the solid voxels into as few boxes as possible (cell units 0..1) — used for collision (and anything that wants boxes)
+  function ocBoxes(o) {
+    const used = new Uint8Array(CN3), out = [];
+    for (let z = 0; z < CN; z++) for (let y = 0; y < CN; y++) for (let x = 0; x < CN; x++) {
+      const i = x + CN * (y + CN * z); if (!o[i] || used[i]) continue;
+      let w = 1; while (x + w < CN && o[i + w] && !used[i + w]) w++;
+      let h = 1; for (; y + h < CN; h++) { let ok = true; for (let k = 0; k < w; k++) { const j = x + k + CN * (y + h + CN * z); if (!o[j] || used[j]) { ok = false; break; } } if (!ok) break; }
+      let d = 1; for (; z + d < CN; d++) { let ok = true; for (let q = 0; q < h && ok; q++) for (let k = 0; k < w; k++) { const j = x + k + CN * (y + q + CN * (z + d)); if (!o[j] || used[j]) { ok = false; break; } } if (!ok) break; }
+      for (let c = 0; c < d; c++) for (let q = 0; q < h; q++) for (let k = 0; k < w; k++) used[x + k + CN * (y + q + CN * (z + c))] = 1;
+      out.push([x / CN, y / CN, z / CN, (x + w) / CN, (y + h) / CN, (z + d) / CN]);
+    }
+    return out;
+  }
+  // mesh of one carved block, centred on the cell centre. Hidden faces are dropped, coplanar neighbours are merged (greedy). Faces are grouped in
+  // BoxGeometry order (+x -x +y -y +z -z) so texture-pack blocks with one material per face still work. UV = position inside the cell (texture stays continuous).
+  function ocGeo(o, S) {
+    const P = [], N = [], U = [], I = [], G = []; let start = 0;
+    const uvOf = (d, x, y, z) => d === 0 ? [1 - z / CN, y / CN] : d === 1 ? [z / CN, y / CN] : d === 2 ? [x / CN, 1 - z / CN] : d === 3 ? [x / CN, z / CN] : d === 4 ? [x / CN, y / CN] : [1 - x / CN, y / CN];
+    for (let d = 0; d < 6; d++) {
+      const ax = d >> 1, sg = (d & 1) ? -1 : 1, ua = ax === 0 ? 1 : 0, va = ax === 2 ? 1 : 2, nv = [0, 0, 0]; nv[ax] = sg;
+      for (let s = 0; s < CN; s++) {
+        const mask = new Uint8Array(CN * CN), c = [0, 0, 0];
+        for (let v = 0; v < CN; v++) for (let u = 0; u < CN; u++) { c[ax] = s; c[ua] = u; c[va] = v; if (ocAt(o, c[0], c[1], c[2]) && !ocAt(o, c[0] + nv[0], c[1] + nv[1], c[2] + nv[2])) mask[u + CN * v] = 1; }
+        for (let v = 0; v < CN; v++) for (let u = 0; u < CN; u++) {
+          if (!mask[u + CN * v]) continue; let w = 1; while (u + w < CN && mask[u + w + CN * v]) w++;
+          let h = 1; for (; v + h < CN; h++) { let ok = true; for (let k = 0; k < w; k++) if (!mask[u + k + CN * (v + h)]) { ok = false; break; } if (!ok) break; }
+          for (let q = 0; q < h; q++) for (let k = 0; k < w; k++) mask[u + k + CN * (v + q)] = 0;
+          const plane = s + (sg > 0 ? 1 : 0), corners = [[u, v], [u + w, v], [u + w, v + h], [u, v + h]], base = P.length / 3, pos = [];
+          corners.forEach(q => { const p = [0, 0, 0]; p[ax] = plane; p[ua] = q[0]; p[va] = q[1]; pos.push(p); P.push((p[0] / CN - 0.5) * S, (p[1] / CN - 0.5) * S, (p[2] / CN - 0.5) * S); N.push(nv[0], nv[1], nv[2]); const t = uvOf(d, p[0], p[1], p[2]); U.push(t[0], t[1]); });
+          const e1 = [pos[1][0] - pos[0][0], pos[1][1] - pos[0][1], pos[1][2] - pos[0][2]], e2 = [pos[2][0] - pos[0][0], pos[2][1] - pos[0][1], pos[2][2] - pos[0][2]];
+          const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+          if (cr[0] * nv[0] + cr[1] * nv[1] + cr[2] * nv[2] >= 0) I.push(base, base + 1, base + 2, base, base + 2, base + 3); else I.push(base, base + 2, base + 1, base, base + 3, base + 2);
+        }
+      }
+      G.push([start, I.length - start, d]); start = I.length;
+    }
+    return { P, N, U, I, G };
+  }
+  // the same carved shape after the block is turned r quarter-turns about Y (and optionally mirrored in X first) — same convention as smTurn / vxXf
+  function ocTurn(o, r, mir) {
+    r = (((r | 0) % 4) + 4) % 4; if (!r && !mir) return o; const n = new Uint8Array(CN3);
+    for (let z = 0; z < CN; z++) for (let y = 0; y < CN; y++) for (let x = 0; x < CN; x++) {
+      if (!o[x + CN * (y + CN * z)]) continue; let a = x, c = z; if (mir) a = CN - 1 - a;
+      for (let q = 0; q < r; q++) { const na = CN - 1 - c, nc = a; a = na; c = nc; }
+      n[a + CN * (y + CN * c)] = 1;
+    }
+    return n;
+  }
+  // remove every solid voxel for which rm(x, y, z) (voxel indices 0..7) is true. Returns { oc: new grid, n: voxels removed }
+  function ocRemove(o, rm) {
+    const n = o.slice(); let k = 0;
+    for (let z = 0; z < CN; z++) for (let y = 0; y < CN; y++) for (let x = 0; x < CN; x++) { const i = x + CN * (y + CN * z); if (n[i] && rm(x, y, z)) { n[i] = 0; k++; } }
+    return { oc: n, n: k };
+  }
+  // saw: everything on one side of a plane. axis 0/1/2, pos = voxel boundary 1..7, side -1 = take away the part below the boundary, +1 = the part above
+  const ocPlaneRm = (axis, pos, side) => (x, y, z) => { const v = axis === 0 ? x : axis === 1 ? y : z; return side < 0 ? v < pos : v >= pos; };
+  // edge i (same numbering as smEdge) rounded with a quarter circle of radius rho voxels; lo/hi = the bounds of the un-carved shape (slab: y 0..4)
+  function ocRoundRm(i, rho, lo, hi) {
+    const k = i >> 2, a = k === 0 ? 1 : 0, b = k === 2 ? 1 : 2, sa = (i & 1) ? 1 : -1, sb = (i & 2) ? 1 : -1;
+    return (x, y, z) => { const c = [x + 0.5, y + 0.5, z + 0.5], da = sa > 0 ? hi[a] - c[a] : c[a] - lo[a], db = sb > 0 ? hi[b] - c[b] : c[b] - lo[b]; return da < rho && db < rho && Math.hypot(rho - da, rho - db) > rho; };
+  }
+  // wear levels (smDecode) -> shape: level 1..4 = edge radius 1,2,3,4 voxels
+  function ocFromWear(base, L) {
+    const slab = base === 'slab', lo = [0, 0, 0], hi = [CN, slab ? CN / 2 : CN, CN]; let o = slab ? ocSlab() : ocFull();
+    for (let i = 0; i < 12; i++) if (L[i] > 0) o = ocRemove(o, ocRoundRm(i, L[i], lo, hi)).oc;
+    return o;
+  }
+  // bevel: remove the half space on one side of the line a*(xa-pa) + b*(xb-pb) >= 0 (axes ia, ib; coordinates are voxel-centre units 0..8)
+  const ocSlopeRm = (ia, sa, pa, ib, sb, pb) => (x, y, z) => { const c = [x + 0.5, y + 0.5, z + 0.5]; return sa * (c[ia] - pa) + sb * (c[ib] - pb) > 0; };
+  // quarter-round: the corner between the face on axis ia (side sa) and the face on axis ib (side sb) is rounded with radius rho voxels
+  const ocQuarterRm = (ia, sa, ib, sb, rho, lo, hi) => (x, y, z) => { const c = [x + 0.5, y + 0.5, z + 0.5], da = sa > 0 ? hi[ia] - c[ia] : c[ia] - lo[ia], db = sb > 0 ? hi[ib] - c[ib] : c[ib] - lo[ib]; return da < rho && db < rho && Math.hypot(rho - da, rho - db) > rho; };
   //#PURE-END
   const VoxelBuild = (function () {
     const KEY = 'forgeVoxelBuild_v1';
@@ -32181,7 +32267,8 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const W = {
       S: null, cells: new Map(), defs: new Map(), nextId: 100, inv: new Array(INV_N).fill(0), hot: [6, 1, 2, 8, 9, 10, 11, 7, 14], slot: 0,
       tool: 'place', digShape: 'square', digSize: 3, digDepth: 1, foundation: false, onGround: true,
-      sel: null, clip: null, rot: 0, mir: 0, pasteCell: null, pasteGround: true, feather: 1, show: true, pendingSlot: -1, replaceFlood: true, sandLvl: 2, sandMode: 'smooth', sandR: 0, sandGrit: 'medium'
+      sel: null, clip: null, rot: 0, mir: 0, pasteCell: null, pasteGround: true, feather: 1, show: true, pendingSlot: -1, replaceFlood: true, sandLvl: 2, sandMode: 'smooth', sandR: 0, sandGrit: 'medium',
+      carp: 'saw', sawAxis: 'auto', sawRm: 'small', cutW: 3, cutD: 1, jigMode: 'slope', chiMode: 'square', chiSize: 2, chiDepth: 2
     };
     // ---------- block catalogue ----------
     const PREMADE = [
@@ -32384,7 +32471,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     resetDefs();
     // ---- v14-9: shaped blocks (doors, stairs, fences, windows ...) = boxes inside one cell; facing = camera direction ----
     const VF = 1000000; // id + VF * r  =  same block turned r * 90 degrees (created on demand, never listed)
-    function ensureVariant(id) { if (!(id >= VF) || W.defs.has(id)) return; const b = W.defs.get(id % VF); if (!b) return; W.defs.set(id, { id, name: b.name, pat: b.pat, color: b.color, opacity: b.opacity, glow: b.glow, shape: b.shape, tp: b.tp, cut: b.cut, boxes: b.boxes, passable: b.passable, climb: b.climb, tog: b.tog, mate: b.mate, half: b.half, img: b.img, rot: Math.floor((id - id % VF) / VF) % 4, sm: b.boxes ? 0 : Math.floor((id - id % VF) / VF / 4), hidden: true, custom: false }); }
+    function ensureVariant(id) { if (!(id >= VF) || W.defs.has(id)) return; const b = W.defs.get(id % VF); if (!b) return; const cc = Math.floor((id - id % VF) / VF / 4); if (cc >= 268435456) { const oc = cutOccAt(cc - 268435456); if (!oc) return; W.defs.set(id, { id, name: b.name, pat: b.pat, color: b.color, opacity: b.opacity, glow: b.glow, shape: 'cube', tp: b.tp, img: b.img, boxes: ocBoxes(oc), occ: oc, rot: 0, sm: 0, hidden: true, custom: false }); return; } W.defs.set(id, { id, name: b.name, pat: b.pat, color: b.color, opacity: b.opacity, glow: b.glow, shape: b.shape, tp: b.tp, cut: b.cut, boxes: b.boxes, passable: b.passable, climb: b.climb, tog: b.tog, mate: b.mate, half: b.half, img: b.img, rot: Math.floor((id - id % VF) / VF) % 4, sm: b.boxes ? 0 : Math.floor((id - id % VF) / VF / 4), hidden: true, custom: false }); }
     function orientId(id, yaw) { const d = W.defs.get(id); if (!d || !d.orient || id >= VF) return id; const r = ((Math.round((yaw + Math.PI) / (Math.PI / 2)) % 4) + 4) % 4; if (!r) return id; const v = id + VF * r; ensureVariant(v); return v; }
     function sibId(base, id) { const v = base + VF * ((id - id % VF) / VF); ensureVariant(v); return v; }
     function mateId(id) { const d = W.defs.get(id); return d && d.mate ? sibId(d.mate, id) : 0; }
@@ -32393,7 +32480,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     function breakList(cell) { const t = W.cells.get(vxKey(cell[0], cell[1], cell[2])), l = [[cell[0], cell[1], cell[2], 0]], d = t && W.defs.get(t); if (d && d.mate) { const m = mateCellType(cell, t, d); if (m) l.push([cell[0], m[0], cell[2], 0]); } return l; }
     function camYawVB() { try { const v = new THREE.Vector3(); camera.getWorldDirection(v); return Math.atan2(-v.x, -v.z); } catch (e) { return 0; } }
     function boxGeo(d) {
-      if (d._geo) return d._geo; const S = W.S, pos = [], nor = [], uv = [], idx = [], rot = (d.rot || 0) * Math.PI / 2, c = Math.cos(rot), s = Math.sin(rot);
+      if (d._geo) return d._geo; if (d.occ) return occGeoOf(d); const S = W.S, pos = [], nor = [], uv = [], idx = [], rot = (d.rot || 0) * Math.PI / 2, c = Math.cos(rot), s = Math.sin(rot);
       d.boxes.forEach(b => { const bg = new THREE.BoxGeometry(1, 1, 1), p = bg.attributes.position, n = bg.attributes.normal, u = bg.attributes.uv, base = pos.length / 3, sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2], cx = (b[0] + b[3]) / 2 - .5, cy = (b[1] + b[4]) / 2 - .5, cz = (b[2] + b[5]) / 2 - .5;
         for (let i = 0; i < p.count; i++) { const x = p.getX(i) * sx + cx, y = p.getY(i) * sy + cy, z = p.getZ(i) * sz + cz; pos.push((x * c + z * s) * S, y * S, (-x * s + z * c) * S); const nx = n.getX(i), ny = n.getY(i), nz = n.getZ(i); nor.push(nx * c + nz * s, ny, -nx * s + nz * c); uv.push(u.getX(i), u.getY(i)); }
         Array.from(bg.index.array).forEach(k => idx.push(base + k)); bg.dispose(); });
@@ -32419,15 +32506,14 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const gritRate = g => (SM_GRIT[g] || SM_GRIT.medium).rate;
     function smoothable(id) { const d = W.defs.get(id); return !!d && !d.boxes && !d.mate && !d.tog; }
     function smIdOf(id, code) { const nid = id % VF + VF * ((vOf(id) % 4) + 4 * code); ensureVariant(nid); return nid; }
-    function smTurnId(id, r, mir) { if (!id || id < VF) return id; const c = smCodeOf(id), c2 = smTurn(c, r, mir); return c2 === c ? id : smIdOf(id, c2); }
+    function smTurnId(id, r, mir) { if (!id || id < VF) return id; if (isCutId(id)) return cutTurnId(id, r, mir); const c = smCodeOf(id), c2 = smTurn(c, r, mir); return c2 === c ? id : smIdOf(id, c2); }
     function smGeo(d) {
       if (d._geo) return d._geo; const s = sandShape(W.S, d.shape === 'slab', smDecode(d.sm || 0)), g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(s.P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(s.N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(s.U, 2)); g.setIndex(s.I);
       s.G.forEach(q => g.addGroup(q[0], q[1], q[2])); g.computeBoundingSphere(); d._geo = g; return g;
     }
     // One rub of the paper at world point `pt` (on block `cell`). R = brush (0 = one block). rate = grit speed. Returns [[x,y,z,newId]] for blocks that lost a level on some edge.
-    function rubList(pt, cell, R, rate) {
-      if (W.sandMode === 'erase') return eraseList(pt, cell, R, rate);
+    function rubEdgeList(pt, cell, R, rate) {
       rubNear = false; if (rubP.size > 20000) rubP.clear();
       const S = W.S, r = Math.max(0, Math.min(SM_RMAX, R | 0)), reach = 0.34 + 0.26 * r, out = [], has = (x, y, z) => W.cells.has(vxKey(x, y, z));
       for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
@@ -32476,10 +32562,179 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const r = Math.max(0, Math.min(SM_RMAX, R | 0)), out = [];
       for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
         if (r > 0 && dx * dx + dy * dy + dz * dz > r * r + 0.5) continue;
-        const x = cell[0] + dx, y = cell[1] + dy, z = cell[2] + dz, k = vxKey(x, y, z), t = W.cells.get(k); if (!t || !smoothable(t) || !(smCodeOf(t) > 0)) continue;
+        const x = cell[0] + dx, y = cell[1] + dy, z = cell[2] + dz, k = vxKey(x, y, z), t = W.cells.get(k); if (t && isCutId(t)) { midBase.delete(k); out.push([x, y, z, t % VF]); continue; } if (!t || !smoothable(t) || !(smCodeOf(t) > 0)) continue;
         for (let i = 0; i < 12; i++) rubP.delete(k * 12 + i); const nid = smIdOf(t, 0); if (nid !== t) out.push([x, y, z, nid]);
       }
       return out;
+    }
+    // ================= v20: 🪵 CARPENTRY — sanding the MIDDLE of a face + Aari (hand saw) / Circular saw / Jigsaw / Chisel =================
+    // Everything carves a block at 8x8x8 (see the pure part: ocXxx). A carved block is an ordinary block id that points into W.cuts, so undo / save /
+    // copy / paste / bake / export keep working. Wear codes (smEncode) stay below CUT_BASE; codes >= CUT_BASE are indexes into the registry.
+    const CUT_BASE = 268435456;
+    W.cuts = []; const cutMap = new Map(), cutOccC = new Map(), roC = new Map(), midBase = new Map();
+    const isCutId = id => id >= VF && smCodeOf(id) >= CUT_BASE;
+    function cutRegister(oc) { const hx = ocHex(oc); let i = cutMap.get(hx); if (i == null) { i = W.cuts.length; W.cuts[i] = hx; cutMap.set(hx, i); } return i; }
+    function cutOccAt(i) { let o = cutOccC.get(i); if (o) return o; const hx = W.cuts[i]; if (!hx) return null; o = ocFromHex(hx); if (o) cutOccC.set(i, o); return o; }
+    function cutResetReg() { W.cuts = []; cutMap.clear(); cutOccC.clear(); roC.clear(); midBase.clear(); }
+    // registry entries that are really used (cells, inventory, hotbar, and the Terrain Game's own inventory) — only those are saved
+    function cutRefs() {
+      const used = new Set(), add = id => { if (id && isCutId(id)) used.add(smCodeOf(id) - CUT_BASE); };
+      W.cells.forEach(t => add(t)); W.inv.forEach(t => add(t)); W.hot.forEach(t => add(t));
+      try { const x = typeof window !== 'undefined' && window.__forgeCutRefs && window.__forgeCutRefs(); if (x) x.forEach(add); } catch (e) { }
+      return used;
+    }
+    function natOcc(base) { const d = W.defs.get(base); return d && d.shape === 'slab' ? ocSlab() : ocFull(); }
+    function cuttable(id) { if (!id) return false; const d = W.defs.get(id % VF); return !!d && !d.boxes && !d.mate && !d.tog && !d.passable && !d.climb; }
+    // the carved shape of any block (a fresh copy you may change); rounded (worn) edges are carried over as the same rounding
+    function occOfId(id) {
+      if (!id) return null; if (isCutId(id)) { const o = cutOccAt(smCodeOf(id) - CUT_BASE); return o ? o.slice() : null; }
+      const d = W.defs.get(id % VF); return ocFromWear(d && d.shape === 'slab' ? 'slab' : 'cube', smDecode(smCodeOf(id)));
+    }
+    function occRO(id) { if (!id) return null; if (isCutId(id)) return cutOccAt(smCodeOf(id) - CUT_BASE); let o = roC.get(id); if (!o) { o = occOfId(id); if (o) roC.set(id, o); } return o; } // read-only, cached
+    // the block id that shows `oc` made of the same material as block `id` (0 = nothing left, plain id = back to the natural shape)
+    function idFromOcc(id, oc) {
+      const base = id % VF; if (!ocCount(oc)) return 0; if (ocEq(oc, natOcc(base))) return base;
+      const nid = base + VF * 4 * (CUT_BASE + cutRegister(oc)); ensureVariant(nid); return nid;
+    }
+    function cutTurnId(id, r, mir) { if (!r && !mir) return id; const o = occOfId(id); return o ? idFromOcc(id, ocTurn(o, r, mir)) : id; }
+    function voxSolidG(fx, fy, fz) { // is the sub-block at this GLOBAL position solid? (other shaped blocks count as solid)
+      const gx = Math.floor(fx), gy = Math.floor(fy), gz = Math.floor(fz), cx = Math.floor(gx / CN), cy = Math.floor(gy / CN), cz = Math.floor(gz / CN), t = W.cells.get(vxKey(cx, cy, cz));
+      if (!t) return false; if (!cuttable(t)) return true; const o = occRO(t); return !!o && !!ocAt(o, gx - cx * CN, gy - cy * CN, gz - cz * CN);
+    }
+    // contact of a tool: the block, the outward face normal (-1/0/1 per axis) and the touch point in GLOBAL sub-block units
+    function contactOf(cell, pt, nrm) {
+      const S = W.S, p = [pt.x / S * CN, pt.y / S * CN, pt.z / S * CN]; let n = nrm && (nrm[0] || nrm[1] || nrm[2]) ? [Math.sign(nrm[0]), Math.sign(nrm[1]), Math.sign(nrm[2])] : null;
+      if (!n) { let ba = 0, bv = -1; for (let a = 0; a < 3; a++) { const q = Math.abs(p[a] - (cell[a] + 0.5) * CN); if (q > bv) { bv = q; ba = a; } } n = [0, 0, 0]; n[ba] = p[ba] > (cell[ba] + 0.5) * CN ? 1 : -1; }
+      return { cell: cell.slice(), n, p };
+    }
+    // the touch point sits on the cell boundary; a carved block's real surface may be deeper — walk inward until there is material
+    function snapSurface(c) {
+      const p = c.p.slice(), n = c.n; if (!(n[0] || n[1] || n[2])) return p;
+      for (let s = 0; s <= 16; s++) { if (voxSolidG(p[0] - n[0] * (s * 0.5 + 0.01), p[1] - n[1] * (s * 0.5 + 0.01), p[2] - n[2] * (s * 0.5 + 0.01))) { return [p[0] - n[0] * s * 0.5, p[1] - n[1] * s * 0.5, p[2] - n[2] * s * 0.5]; } }
+      return p;
+    }
+    // apply rm(gx, gy, gz) (GLOBAL sub-block indices) to every carvable block in the cell box lo..hi; returns [[x,y,z,newId]]
+    function carveRange(lo, hi, rm) {
+      const out = []; let cnt = 0;
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
+        const t = W.cells.get(vxKey(x, y, z)); if (!t || !cuttable(t)) continue; if (++cnt > 6000) return out;
+        const oc = occRO(t); if (!oc) continue; const bx = x * CN, by = y * CN, bz = z * CN, r = ocRemove(oc, (i, j, k) => rm(bx + i, by + j, bz + k)); if (!r.n) continue;
+        const nid = idFromOcc(t, r.oc); if (nid !== t) out.push([x, y, z, nid]);
+      }
+      return out;
+    }
+    // ---- 📄 sandpaper on the MIDDLE of a face (and on any already carved block): wears the surface itself, one sub-block at a time ----
+    const MID_T = 1.7, MID_CAP = 0.25; // rubbing needed to wear ONE sub-block away; sandpaper never takes more than 25% of a block (use 🕳 Poora ghiso / 🔨 Chisel for more)
+    const rubV = new Map(); let rubCapHit = false; // wear progress of single sub-blocks (not saved)
+    function voxExposedG(x, y, z, o, i, j, k) { // is sub-block (i,j,k) of block (x,y,z) touching air on some side?
+      for (let d = 0; d < 6; d++) {
+        const ax = d >> 1, sg = (d & 1) ? -1 : 1, q = [i, j, k]; q[ax] += sg;
+        if (q[0] >= 0 && q[1] >= 0 && q[2] >= 0 && q[0] < CN && q[1] < CN && q[2] < CN) { if (!o[q[0] + CN * (q[1] + CN * q[2])]) return true; continue; }
+        const c = [x, y, z]; c[ax] += sg; const t2 = W.cells.get(vxKey(c[0], c[1], c[2])); if (!t2) return true; if (!cuttable(t2)) continue;
+        const o2 = occRO(t2); if (!o2) return true; q[ax] = sg > 0 ? 0 : CN - 1; if (!o2[q[0] + CN * (q[1] + CN * q[2])]) return true;
+      }
+      return false;
+    }
+    // finger close to an edge / corner of the face it touches? (then the old edge-rounding is used; in the middle of the face the surface itself is worn)
+    function contactNearEdge(pt, cell, t, r) {
+      const S = W.S, d = W.defs.get(t % VF), slab = !!d && d.shape === 'slab', H = [S / 2, slab ? S / 4 : S / 2, S / 2];
+      const p = [pt.x - (cell[0] + 0.5) * S, pt.y - (cell[1] + (slab ? 0.25 : 0.5)) * S, pt.z - (cell[2] + 0.5) * S];
+      let fa = 0, best = -1; for (let a = 0; a < 3; a++) { const q = Math.abs(p[a]) / H[a]; if (q > best) { best = q; fa = a; } }
+      let m = Infinity; for (let a = 0; a < 3; a++) if (a !== fa) m = Math.min(m, (H[a] - Math.abs(p[a])) / S);
+      return m < 0.2 + 0.08 * Math.max(0, Math.min(16, r | 0));
+    }
+    function rubMidList(pt, cell, R, rate, nrm) {
+      rubNear = false; rubCapHit = false; if (rubV.size > 80000) rubV.clear();
+      const r = Math.max(0, Math.min(3, R | 0)), rho = (0.2 + 0.5 * r) * CN, p = snapSurface(contactOf(cell, pt, nrm)), out = [];
+      const lo = [0, 1, 2].map(a => Math.floor((p[a] - rho) / CN)), hi = [0, 1, 2].map(a => Math.floor((p[a] + rho) / CN));
+      for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
+        const k = vxKey(x, y, z), t = W.cells.get(k); if (!t || !cuttable(t)) continue; const roc = occRO(t); if (!roc) continue;
+        const bx = x * CN, by = y * CN, bz = z * CN, i0 = Math.max(0, Math.floor(p[0] - rho - bx)), i1 = Math.min(CN - 1, Math.floor(p[0] + rho - bx)), j0 = Math.max(0, Math.floor(p[1] - rho - by)), j1 = Math.min(CN - 1, Math.floor(p[1] + rho - by)), k0 = Math.max(0, Math.floor(p[2] - rho - bz)), k1 = Math.min(CN - 1, Math.floor(p[2] + rho - bz));
+        if (i0 > i1 || j0 > j1 || k0 > k1) continue;
+        let oc = null, left = ocCount(roc), base = midBase.get(k); if (base == null) { base = left; midBase.set(k, base); }
+        for (let kk = k0; kk <= k1; kk++) for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+          const vi = ii + CN * (jj + CN * kk); if (!roc[vi]) continue;
+          const dx = bx + ii + 0.5 - p[0], dy = by + jj + 0.5 - p[1], dz = bz + kk + 0.5 - p[2], d2 = dx * dx + dy * dy + dz * dz; if (d2 > rho * rho) continue;
+          if (!voxExposedG(x, y, z, roc, ii, jj, kk)) continue; rubNear = true;
+          const w = 1 - Math.sqrt(d2) / rho, pk = k * 600 + vi, pr = (rubV.get(pk) || 0) + rate * w * w;
+          if (pr >= MID_T) {
+            if (base - left >= base * MID_CAP) { rubCapHit = true; continue; }
+            if (!oc) oc = roc.slice(); oc[vi] = 0; left--; rubV.delete(pk);
+          } else rubV.set(pk, pr);
+        }
+        if (oc) { const nid = idFromOcc(t, oc); if (nid !== t) out.push([x, y, z, nid]); }
+      }
+      return out;
+    }
+    // one rub of the paper: edges / corners round off (old behaviour), the middle of a face / a carved block wears away
+    function rubList(pt, cell, R, rate, nrm) {
+      if (W.sandMode === 'erase') return eraseList(pt, cell, R, rate);
+      const t0 = W.cells.get(vxKey(cell[0], cell[1], cell[2]));
+      if (t0 && cuttable(t0) && (isCutId(t0) || !contactNearEdge(pt, cell, t0, R))) return rubMidList(pt, cell, R, rate, nrm);
+      return rubEdgeList(pt, cell, R, rate);
+    }
+    // ---- 🪚 Aari / ⭕ Circular saw / 〰 Jigsaw / 🔨 Chisel ----
+    let carpMsg = '', chiLast = null, chiT = 0;
+    const clampN = (v, a, b) => Math.max(a, Math.min(b, v | 0));
+    // straight cut plane for a touch: axis (auto = the direction along the touched face in which the finger is further from the middle), position (nearest sub-block line) and side to take away
+    function sawPlan(c) {
+      const nA = c.n.findIndex(v => v !== 0), lp = c.p.map((v, a) => v - c.cell[a] * CN); let ax = W.sawAxis === 'x' ? 0 : W.sawAxis === 'y' ? 1 : W.sawAxis === 'z' ? 2 : -1;
+      if (ax < 0) { const cand = [0, 1, 2].filter(a => a !== nA); let best = cand[0], bv = -1; cand.forEach(a => { const q = Math.abs(lp[a] - CN / 2); if (q > bv + 1e-9) { bv = q; best = a; } }); ax = bv < 0.75 ? (nA === 1 ? 0 : 1) : best; }
+      const pos = clampN(Math.round(lp[ax]), 1, CN - 1), side = W.sawRm === 'plus' ? 1 : W.sawRm === 'minus' ? -1 : (pos <= CN / 2 ? -1 : 1);
+      return { ax, pos, side };
+    }
+    function carpSaw(c, power) {
+      const pl = sawPlan(c), ax = pl.ax, G = c.cell[ax] * CN + pl.pos, side = pl.side, rm = (gx, gy, gz) => { const v = ax === 0 ? gx : ax === 1 ? gy : gz; return side < 0 ? v < G : v >= G; };
+      const lo = c.cell.slice(), hi = c.cell.slice();
+      if (power) {
+        const nA = c.n.findIndex(v => v !== 0), w = clampN(W.cutW, 0, 16), D = clampN(W.cutD, 1, 8);
+        for (let a = 0; a < 3; a++) { if (a === ax) continue; if (a === nA) { const far = c.cell[a] - (c.n[a] || 1) * (D - 1); lo[a] = Math.min(c.cell[a], far); hi[a] = Math.max(c.cell[a], far); } else { lo[a] = c.cell[a] - w; hi[a] = c.cell[a] + w; } }
+      }
+      const out = carveRange(lo, hi, rm); if (!out.length) carpMsg = 'Yahan kaatne ko kuch nahi mila — wo hissa pehle se kata hua hai'; return out;
+    }
+    function carpJig(c) {
+      const nA = c.n.findIndex(v => v !== 0), sn = c.n[nA] > 0 ? 1 : -1, cell = c.cell, lp = c.p.map((v, a) => v - cell[a] * CN), cand = [0, 1, 2].filter(a => a !== nA);
+      let b = cand[0], mb = Infinity, sb = 1; cand.forEach(a => { const dd = Math.min(lp[a], CN - lp[a]); if (dd < mb - 1e-9) { mb = dd; b = a; sb = lp[a] < CN / 2 ? -1 : 1; } });
+      const e = cand.find(a => a !== b); let rm;
+      if (W.jigMode === 'round') {
+        const d0 = W.defs.get(W.cells.get(vxKey(cell[0], cell[1], cell[2])) % VF), slab = !!d0 && d0.shape === 'slab', lo = [0, 1, 2].map(a => cell[a] * CN), hi = [0, 1, 2].map(a => cell[a] * CN + (a === 1 && slab ? CN / 2 : CN));
+        rm = ocQuarterRm(nA, sn, b, sb, clampN(Math.round(mb * 1.5 + 0.5), 1, 6), lo, hi);
+      } else rm = ocSlopeRm(nA, sn, c.p[nA], b, sb, c.p[b]);
+      const lo2 = cell.slice(), hi2 = cell.slice(), w = clampN(W.cutW, 0, 16); lo2[e] = cell[e] - w; hi2[e] = cell[e] + w;
+      const out = carveRange(lo2, hi2, rm); if (!out.length) carpMsg = 'Is kone par kaatne ko kuch nahi mila — ungli kinare ke paas rakho'; return out;
+    }
+    function chiGate(p, rho, nA) { // a held chisel carves once, then again only after the finger moved on (so holding still does not drill through)
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (!chiLast || now - chiT > 450 || Math.hypot(nA === 0 ? 0 : p[0] - chiLast[0], nA === 1 ? 0 : p[1] - chiLast[1], nA === 2 ? 0 : p[2] - chiLast[2]) >= Math.max(1, rho * 0.9)) { chiLast = p.slice(); chiT = now; return true; }
+      chiT = now; return false;
+    }
+    function carpChisel(c) {
+      const nA = c.n.findIndex(v => v !== 0), sn = c.n[nA] > 0 ? 1 : -1, sp = snapSurface(c), rho = clampN(W.chiSize, 1, 4), dep = clampN(W.chiDepth, 1, 4), mode = W.chiMode, u = (nA + 1) % 3, v = (nA + 2) % 3;
+      if (!chiGate(sp, rho, nA)) return [];
+      const rm = (gx, gy, gz) => {
+        const cc = [gx + 0.5, gy + 0.5, gz + 0.5], dd = (sp[nA] - cc[nA]) * sn, du = cc[u] - sp[u], dv = cc[v] - sp[v]; if (dd <= 0) return false;
+        if (mode === 'round') return Math.hypot(du, dv, dd) < rho + 0.5;
+        if (dd >= dep) return false;
+        if (mode === 'v') { const hw = rho * (1 - (dd - 0.5) / dep); return Math.abs(du) < hw && Math.abs(dv) < hw; }
+        return Math.abs(du) < rho && Math.abs(dv) < rho;
+      };
+      const rr = rho + dep + 1, lo = [0, 1, 2].map(a => Math.floor((sp[a] - rr) / CN)), hi = [0, 1, 2].map(a => Math.floor((sp[a] + rr) / CN));
+      const out = carveRange(lo, hi, rm); if (!out.length) carpMsg = 'Yahan chisel se hatane layak hissa nahi mila'; return out;
+    }
+    // one use of the current carpentry tool at a touch (cell + world point + outward normal). Returns [[x,y,z,newId]]; carpMsg says why if nothing happened
+    function carpAct(cell, pt, nrm) {
+      carpMsg = ''; const t = W.cells.get(vxKey(cell[0], cell[1], cell[2]));
+      if (!t || !cuttable(t)) { carpMsg = 'Ye block kaata nahi ja sakta (seedhi / darwaza / fence jaise shaped blocks nahi katte)'; return []; }
+      const c = contactOf(cell, pt, nrm); let list;
+      if (W.carp === 'saw' || W.carp === 'circ') list = carpSaw(c, W.carp === 'circ'); else if (W.carp === 'jig') list = carpJig(c); else list = carpChisel(c);
+      list.forEach(q => midBase.delete(vxKey(q[0], q[1], q[2]))); return list;
+    }
+    const CARP_LABEL = { saw: 'aari', circ: 'circular saw', jig: 'jigsaw', chisel: 'chisel' };
+    // geometry of a carved block (see ocGeo): same job boxGeo / smGeo do for the other shaped blocks
+    function occGeoOf(d) {
+      const s = ocGeo(d.occ, W.S), g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(s.P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(s.N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(s.U, 2)); g.setIndex(s.I);
+      s.G.forEach(q => g.addGroup(q[0], q[1], q[2])); g.computeBoundingSphere(); d._geo = g; return g;
     }
     // a little dust while rubbing (looks only)
     const dust = { n: 40, i: 0, run: false, pts: null, mat: null, pos: null, vel: null, life: null, t0: 0 };
@@ -32512,7 +32767,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     function rubTick(force) {
       if (!rub) return; const now = performance.now(); if (!force && now - rub.t < 60) return; rub.t = now; rub.tried++;
       const h = pickAt({ clientX: rub.cx, clientY: rub.cy }); if (!h || h.kind !== 'voxel') return; rub.hit++;
-      const reset = W.sandMode === 'reset', list = reset ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit));
+      const reset = W.sandMode === 'reset', list = reset ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit), h.n);
       if (!reset && rubNear) { rub.near++; dustAt(h.point, h.cell); } if (!list.length) return;
       const m = new Map(); list.forEach(q => { const k = vxKey(q[0], q[1], q[2]), cur = W.cells.get(k) || 0; if (cur === q[3]) return; m.set(k, [cur, q[3]]); const a = rub.all.get(k); if (a) a[1] = q[3]; else rub.all.set(k, [cur, q[3]]); });
       if (m.size) { applyCh(m, false); rub.worn += m.size; haptic(HAPTIC.tick); }
@@ -32523,12 +32778,33 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       if (!r.hit) toast('Block par ungli rakh kar ghiso — ground par sandpaper kaam nahi karta', 1800);
       else if (W.sandMode === 'reset') toast('Is block par ghisa hua kuch nahi tha', 1400);
       else if (W.sandMode === 'erase' && !r.near) toast('Is jagah ghisne ko koi khula block nahi mila', 1800);
-      else if (!r.near) toast('Kinare ya kone ke paas ghiso — face ke beech mein ghisne se block nahi ghista', 2600);
+      else if (!r.near) toast('Yahan ghisne layak khula hissa nahi mila — block ke bahar ke hisse par ghiso', 2600);
+      else if (rubCapHit) toast('Itna hi ghista hai: ek block ka 25% se zyada sandpaper se nahi ghista — poora hatana ho to 🕳 Poora ghiso ya 🔨 Chisel', 3400);
       else toast('Thoda aur ghiso 🪚 — kinara dheere dheere ghista hai (Moti kaagaz tez hai)', 2200);
+    }
+    // ---- 🪵 Carpentry in the Build tab: tap = one saw cut / jigsaw cut; chisel = drag stroke ----
+    let carpS = null, carpTimer = 0;
+    function doCarp(h) {
+      if (h.kind !== 'voxel') { toast('Kisi bane hue block par tap karo — zameen par ye tool nahi chalta', 1800); return; }
+      const list = carpAct(h.cell, h.point, h.n); if (!list.length) { toast(carpMsg || 'Kuch nahi kata', 1800); return; }
+      const ch = Chg(); list.forEach(q => ch.set(q, q[3])); if (commit(CARP_LABEL[W.carp], ch)) { haptic(HAPTIC.tick); dustAt(h.point, h.cell); }
+    }
+    function carpStart(e) { chiLast = null; carpS = { id: e.pointerId, cx: e.clientX, cy: e.clientY, t: 0, all: new Map(), hit: 0 }; carpTimer = setInterval(() => carpTick(true), 90); carpTick(true); }
+    function carpTick(force) {
+      if (!carpS) return; const now = performance.now(); if (!force && now - carpS.t < 60) return; carpS.t = now;
+      const h = pickAt({ clientX: carpS.cx, clientY: carpS.cy }); if (!h || h.kind !== 'voxel') return; carpS.hit++;
+      const list = carpAct(h.cell, h.point, h.n); if (!list.length) return; const m = new Map();
+      list.forEach(q => { const k = vxKey(q[0], q[1], q[2]), cur = W.cells.get(k) || 0; if (cur === q[3]) return; m.set(k, [cur, q[3]]); const a = carpS.all.get(k); if (a) a[1] = q[3]; else carpS.all.set(k, [cur, q[3]]); });
+      if (m.size) { applyCh(m, false); dustAt(h.point, h.cell); haptic(HAPTIC.tick); }
+    }
+    function carpEnd() {
+      if (!carpS) return; clearInterval(carpTimer); const r = carpS; carpS = null;
+      if (r.all.size) { const m = r.all; pushObjHistory({ label: 'chisel', undo: () => { applyCh(m, true); refreshTab(); }, redo: () => { applyCh(m, false); refreshTab(); } }); return; }
+      toast(!r.hit ? 'Chisel ko block par rakh kar chalao' : (carpMsg || 'Kuch nahi kata'), 1800);
     }
     function doSand(h) { // not used for drag, kept so the old tap dispatch table still works: one short rub
       if (h.kind !== 'voxel') { toast('Kisi bane hue block par ghiso — 🪚 sandpaper sirf blocks par chalta hai', 1800); return; }
-      const ch = Chg(); let list = []; for (let q = 0; q < 4; q++) list = list.concat(W.sandMode === 'reset' ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit)));
+      const ch = Chg(); let list = []; for (let q = 0; q < 4; q++) list = list.concat(W.sandMode === 'reset' ? sandResetList(h.cell, W.sandR) : rubList(h.point, h.cell, W.sandR, gritRate(W.sandGrit), h.n));
       list.forEach(q => ch.set(q, q[3])); if (commit('sandpaper', ch)) haptic(HAPTIC.tick);
     }
     // whole selected area in one go: raise every OUTSIDE edge of every block to level N (never softens a worn edge); reset mode = all sharp again
@@ -32944,17 +33220,19 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     // ---------- persistence ----------
     let saveTimer = null;
     function serialize() {
-      return { v: 1, catV: CAT_V, S: ensureS(), nextId: W.nextId, inv: W.inv.slice(), hot: W.hot.slice(), slot: W.slot, runs: vxEncode(W.cells),
+      const o = { v: 1, catV: CAT_V, S: ensureS(), nextId: W.nextId, inv: W.inv.slice(), hot: W.hot.slice(), slot: W.slot, runs: vxEncode(W.cells),
         defs: Array.from(W.defs.values()).filter(d => d.custom).map(d => ({ id: d.id, name: d.name, pat: d.pat, color: d.color, opacity: d.opacity, glow: !!d.glow, shape: d.shape, img: d.img || null })) };
+      const cr = cutRefs(); if (cr.size) { o.cuts = {}; cr.forEach(i => { o.cuts[i] = W.cuts[i]; }); }
+      return o;
     }
     function load(data) {
       if (!data || !data.runs || !data.S) return false;
       metas.forEach(m => { group.remove(m.mesh); m.mesh.dispose(); }); metas.clear();
       W.defs.forEach(d => dropDefGfx(d)); resetDefs();
       (data.defs || []).forEach(d => W.defs.set(d.id, { id: d.id, name: d.name, pat: d.pat || 'plain', color: d.color || '#888888', opacity: d.opacity == null ? 1 : d.opacity, glow: !!d.glow, shape: d.shape || 'cube', img: d.img || null, custom: true }));
-      W.S = data.S; W.cells = vxDecode(data.runs); W.nextId = Math.max(data.nextId || 100, 100); W.cells.forEach(t => ensureVariant(t));
+      cutResetReg(); if (data.cuts && typeof data.cuts === 'object') Object.keys(data.cuts).forEach(k => { const i = k | 0, hx = data.cuts[k]; if (i >= 0 && ocFromHex(hx) && !cutMap.has(hx)) { W.cuts[i] = hx; cutMap.set(hx, i); } }); W.S = data.S; W.cells = vxDecode(data.runs); W.nextId = Math.max(data.nextId || 100, 100); W.cells.forEach(t => ensureVariant(t));
       if (Array.isArray(data.inv) && data.inv.length >= 20 && data.inv.length <= INV_N) { W.inv = data.inv.slice(); while (W.inv.length < INV_N) W.inv.push(0); } else W.inv = defaultInv();
-      if (Array.isArray(data.hot) && data.hot.length === 9) W.hot = data.hot.slice(); W.hot.forEach(t => ensureVariant(t)); W.slot = Math.min(8, Math.max(0, data.slot | 0)); normalizeInv(data.catV);
+      if (Array.isArray(data.hot) && data.hot.length === 9) W.hot = data.hot.slice(); W.hot.forEach(t => ensureVariant(t)); W.inv.forEach(t => ensureVariant(t)); W.slot = Math.min(8, Math.max(0, data.slot | 0)); normalizeInv(data.catV);
       W.sel = null; W.pasteCell = null; geoS = 0; rebuild(); updateSelBox(); return true;
     }
     function saveNow(loud) {
@@ -33034,7 +33312,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       pasteGhost.position.set(o[0] * S, o[1] * S, o[2] * S); group.add(pasteGhost); requestRender();
     }
     // ---------- tools ----------
-    const toolIsCamera = () => W.tool !== 'dig' && W.tool !== 'fill' && W.tool !== 'sand'; // these tools are drag strokes (use the Orbit button to move the camera)
+    const toolIsCamera = () => W.tool !== 'dig' && W.tool !== 'fill' && W.tool !== 'sand' && !(W.tool === 'carp' && W.carp === 'chisel'); // these tools are drag strokes (use the Orbit button to move the camera)
     function applyCam() { controls.enabled = orbitOverride || toolIsCamera(); if (controls.enabled && !orbitOverride) { try { applyCameraModeFlags('orbit'); } catch (e) { } } }
     function curDef() { return W.defs.get(W.hot[W.slot]) || null; }
     function doPlace(h) {
@@ -33170,20 +33448,21 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     const active = () => workspace === 'terrain' && terrainMode === 'voxel' && !orbitOverride && !!terrainRoot;
     el.addEventListener('pointerdown', e => {
       if (!active()) return; ptrs.set(e.pointerId, 1);
-      if (ptrs.size > 1) { tap = null; if (stroke) strokeEnd(); if (rub) rubEnd(); return; }
-      if (!toolIsCamera()) { if (W.tool === 'sand') rubStart(e); else strokeStart(e); } else tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+      if (ptrs.size > 1) { tap = null; if (stroke) strokeEnd(); if (rub) rubEnd(); if (carpS) carpEnd(); return; }
+      if (!toolIsCamera()) { if (W.tool === 'sand') rubStart(e); else if (W.tool === 'carp') carpStart(e); else strokeStart(e); } else tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
     });
     el.addEventListener('pointermove', e => {
       if (!active()) return;
       if (tap && e.pointerId === tap.id && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 9) tap = null;
       if (stroke && e.pointerId === stroke.id) { strokeMove(e); return; }
       if (rub && e.pointerId === rub.id) { rub.cx = e.clientX; rub.cy = e.clientY; rubTick(false); return; }
+      if (carpS && e.pointerId === carpS.id) { carpS.cx = e.clientX; carpS.cy = e.clientY; carpTick(false); return; }
       if (e.pointerType === 'mouse' && !ptrs.size && performance.now() - lastHover > 110 && (W.tool === 'place' || W.tool === 'paste')) { lastHover = performance.now(); const h = pickAt(e); if (!h) { hideGhost(); return; } if (W.tool === 'place') { const d = curDef(); showGhost(placeCellOf(h, null), d && d.shape === 'slab'); } }
     });
     function pup(e) {
       const wasTap = tap && tap.id === e.pointerId && e.type === 'pointerup' && performance.now() - tap.t < 650; const t = tap; if (t && t.id === e.pointerId) tap = null;
-      if (stroke && stroke.id === e.pointerId) strokeEnd(); if (rub && rub.id === e.pointerId) rubEnd(); const had = ptrs.delete(e.pointerId);
-      if (wasTap && had && active() && ptrs.size === 0) { const h = pickAt(e); if (!h) { toast('Tap the ground or a block', 1200); return; } ({ place: doPlace, break: doBreak, pick: doPick, replace: doReplace, sand: doSand, select: doSelect, paste: doPasteAim })[W.tool](h); }
+      if (stroke && stroke.id === e.pointerId) strokeEnd(); if (rub && rub.id === e.pointerId) rubEnd(); if (carpS && carpS.id === e.pointerId) carpEnd(); const had = ptrs.delete(e.pointerId);
+      if (wasTap && had && active() && ptrs.size === 0) { const h = pickAt(e); if (!h) { toast('Tap the ground or a block', 1200); return; } ({ place: doPlace, break: doBreak, pick: doPick, replace: doReplace, sand: doSand, carp: doCarp, select: doSelect, paste: doPasteAim })[W.tool](h); }
     }
     el.addEventListener('pointerup', pup); el.addEventListener('pointercancel', e => { tap = null; pup(e); }); window.addEventListener('pointerup', e => { if (ptrs.has(e.pointerId) && e.target !== el) pup(e); });
     // ---------- bake into Map objects (so Export / Godot see the build) ----------
@@ -33277,6 +33556,8 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       ensureS(); const S = W.S;
       note('Minecraft jaisa: block grid par rakho, todo, ghar banao. Ek ungli se ghumao (camera), tap = tool ka kaam. 🕳/⛰ tool mein ungli ghisao.');
       { const gb = rowEl(true); gb.appendChild(btn('🎮 Game mein kholo — character ban kar banao (auto-save)', () => { try { window.ForgeTerrainGame.open(); } catch (e) { toast('Terrain Game error: ' + e.message, 3000); } }, true)); }
+      { const er = rowEl(true); er.appendChild(btn('✨ Texture Enhancer (strength slider)', () => { if (window.RealLife) window.RealLife.panel(); }, true)); }
+      toggleRow('🌍 Real-Life Mode (blocks = asli cheezen, asli collision)', !!(window.RealLife && window.RealLife.on()), v => { if (window.RealLife) window.RealLife.set(v); });
       toggleRow('Build tab kholte hi game apne aap khule', autoOpenOn(), v => { try { localStorage.setItem('forgeTerrainAutoOpen', v ? '1' : '0'); } catch (e) { } });
       const hb = mkEl('div', 'display:flex;gap:4px;align-items:center;margin:2px 0 6px;overflow-x:auto;');
       for (let i = 0; i < 9; i++) {
@@ -33288,16 +33569,16 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const cd = curDef(); dock.appendChild(mkEl('div', 'font-size:11px;color:var(--ink-dim);margin:0 2px 4px;', cd ? 'Chuna hua: ' + cd.name + (cd.shape === 'slab' ? ' (aadha block)' : '') : 'Slot empty — open 🎒'));
       texPackUI();
       sizeUI();
-      const tr = rowEl(true); [['place', '➕ Place'], ['break', '⛏ Break'], ['pick', '🧪 Pick'], ['replace', '🖌 Replace'], ['sand', '🪚 Sandpaper'], ['dig', '🕳 Dig Pit'], ['fill', '⛰ Fill'], ['select', '▭ Select'], ['paste', '📋 Paste']].forEach(([t, l]) => tr.appendChild(btn(l, () => setTool(t), W.tool === t)));
+      const tr = rowEl(true); [['place', '➕ Place'], ['break', '⛏ Break'], ['pick', '🧪 Pick'], ['replace', '🖌 Replace'], ['sand', '🪚 Sandpaper'], ['carp', '🪵 Carpentry'], ['dig', '🕳 Dig Pit'], ['fill', '⛰ Fill'], ['select', '▭ Select'], ['paste', '📋 Paste']].forEach(([t, l]) => tr.appendChild(btn(l, () => setTool(t), W.tool === t)));
       if (W.tool === 'place') { section('➕ Place Block'); note('Block ya ground par tap karo — naya block wahin lagega. Slope par "Fill Foundation" on ho to block hawa mein nahi latakta.'); toggleRow('Place on Ground (block zameen ke andar nahi dhansega)', W.onGround, v => { W.onGround = v; }); toggleRow('Fill Foundation (fills down the slope)', W.foundation, v => { W.foundation = v; }); }
       else if (W.tool === 'break') { section('⛏ Break Block'); note('Tap a block. Ground ke liye 🕳 Dig Pit tool.'); }
       else if (W.tool === 'pick') { section('🧪 Pick'); note('Kisi bane hue block par tap karo — wahi block hotbar mein aa jayega.'); }
       else if (W.tool === 'replace') { section('🖌 Replace Block'); note('Kisi bane hue block par tap karo — wo block hotbar ke chune hue block se badal jayega. Undo kaam karta hai.'); toggleRow('Jude hue sab same blocks badlo (off = sirf ek block)', W.replaceFlood, v => { W.replaceFlood = v; }); }
       else if (W.tool === 'sand') {
         section('🪚 Sandpaper — asli ghisai');
-        note('v18: "🕳 Poora ghiso" mode mein ungli kisi bhi block par rakh kar ghisate raho — block dheere dheere gol hoke POORA khatam ho jaata hai (koi limit nahi), neeche ke blocks khulte jaate hain, isse gadda banta hai. Brush slider se ek baar mein kitna area ghise wo chuno (1 block se 33 block tak). ' + 'Ungli block ke KINARE ya KONE ke paas rakh kar ghiso (ungli hilate raho, jaise kaagaz ghiste hain). Asli sandpaper ki tarah: kinare aur kone pehle ghisate hain, face ke beech mein kuch nahi hota; jitna zyada ghisoge utna zyada gol (4 level). Ye sirf ghista hai — material hatata hai. Sirf BAHAR ke kinare ghisate hain; jude hue blocks ki seam wahi rehti hai. Ek kinara ghiso to sirf wahi gol hota hai (jaise khamba / gumbad / mehraab banane ke liye). Undo kaam karta hai. Camera ghumana ho to Orbit button dabao.');
+        note('v18: "🕳 Poora ghiso" mode mein ungli kisi bhi block par rakh kar ghisate raho — block dheere dheere gol hoke POORA khatam ho jaata hai (koi limit nahi), neeche ke blocks khulte jaate hain, isse gadda banta hai. Brush slider se ek baar mein kitna area ghise wo chuno (1 block se 33 block tak). ' + 'Ungli block ke KINARE ya KONE ke paas rakh kar ghiso (ungli hilate raho, jaise kaagaz ghiste hain). Kinare / kone ke paas ghiso = kinara gol (4 level). Face ke BEECH mein ghiso = sandpaper block ki surface hi ghista hai (chhote 1/8 tukde ek ek karke hatte hain), ek block ka max 25% — usse zyada hatana ho to 🕳 Poora ghiso ya 🪵 Chisel. Ye sirf ghista hai — material hatata hai. Sirf BAHAR ke kinare ghisate hain; jude hue blocks ki seam wahi rehti hai. Ek kinara ghiso to sirf wahi gol hota hai (jaise khamba / gumbad / mehraab banane ke liye). Undo kaam karta hai. Camera ghumana ho to Orbit button dabao.');
         section('Kaam ka tareeka');
-        const md = rowEl(true); md.appendChild(btn('🔘 Sirf kinare gol (4 level tak)', () => { W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode === 'smooth')); md.appendChild(btn('🕳 Poora ghiso — block khatam', () => { W.sandMode = 'erase'; buildTerrainDock(); }, W.sandMode === 'erase'));
+        const md = rowEl(true); md.appendChild(btn('🔘 Kinare gol + beech ghisai', () => { W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode === 'smooth')); md.appendChild(btn('🕳 Poora ghiso — block khatam', () => { W.sandMode = 'erase'; buildTerrainDock(); }, W.sandMode === 'erase'));
         section('Kaagaz (grit)');
         const gr = rowEl(true); Object.keys(SM_GRIT).forEach(g => gr.appendChild(btn(SM_GRIT[g].l, () => { W.sandGrit = g; if (W.sandMode === 'reset') W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode !== 'reset' && W.sandGrit === g)));
         section('Brush — ek baar mein kitna area ghise');
@@ -33310,6 +33591,19 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
           const lr = rowEl(true); [[1, 'Halka'], [2, 'Medium'], [3, 'Zyada'], [4, 'Gol']].forEach(([n, l]) => lr.appendChild(btn(l, () => { W.sandLvl = n; if (W.sandMode === 'reset') W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode !== 'reset' && W.sandLvl === n)));
           const sr = rowEl(true); sr.appendChild(btn(W.sandMode === 'reset' ? '▭ Re-sharpen Selected Area' : '▭ Poore area ke bahar ke kinare ghiso', sandSelection, true));
         } else note('Poori imaarat / deewar ek saath ghisni ho to pehle ▭ Select se area chuno, phir yahan wapas aao.');
+      }
+      else if (W.tool === 'carp') {
+        section('🪵 Carpentry — kaato, tarasho, gol karo');
+        note('Har block 8×8×8 chhote tukdon ka hota hai, isliye aap ek block ko aadha, chauthai ya kisi bhi shape mein kaat sakte ho. Kata hua block ab bhi normal block hai: undo, save, copy/paste, export sab chalte hain. Seedhi / darwaza / fence jaise shaped blocks nahi katte.');
+        const tr2 = rowEl(true); [['saw', '🪚 Aari (Hand Saw)'], ['circ', '⭕ Circular Saw'], ['jig', '〰 Jigsaw'], ['chisel', '🔨 Chisel']].forEach(([k, l]) => tr2.appendChild(btn(l, () => { W.carp = k; applyCam(); buildTerrainDock(); }, W.carp === k)));
+        const axisRow = () => { section('Kis disha mein kaatna'); const r = rowEl(true); [['auto', '🧭 Auto'], ['x', '⬌ Dayen-bayen'], ['y', '⬍ Upar-neeche'], ['z', '⤢ Aage-peeche']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.sawAxis = k; buildTerrainDock(); }, W.sawAxis === k))); section('Kaun sa hissa hatana'); const r2 = rowEl(true); [['small', 'Chhota tukda'], ['plus', '+ taraf (upar/aage/dayen)'], ['minus', '− taraf']].forEach(([k, l]) => r2.appendChild(btn(l, () => { W.sawRm = k; buildTerrainDock(); }, W.sawRm === k))); };
+        const widthSl = lbl => { const sl = mkSlider(0, 16, 1, W.cutW | 0, v => { W.cutW = Math.round(v); }, v => Math.round(v) === 0 ? 'sirf 1' : '±' + Math.round(v) + ' blk'); dock.appendChild(mkFieldGrid([mkField('↔', lbl, sl)], 1)); };
+        if (W.carp === 'saw') { axisRow(); note('Block ke us point par tap karo jahan kaatna hai: cut nazdeeki 1/8 line par lagta hai. Auto = ungli jis taraf kinare ke paas hai us disha mein kaatta hai.'); }
+        else if (W.carp === 'circ') { axisRow(); widthSl('Kitne blocks ek saath (dono taraf)'); const dp = mkSlider(1, 8, 1, W.cutD | 0, v => { W.cutD = Math.round(v); }, v => Math.round(v) + ' blk gehra'); dock.appendChild(mkFieldGrid([mkField('⬇', 'Kitna gehra kaate', dp)], 1)); note('Power tool: ek hi tap mein poori line / deewar ek barabar kat jaati hai.'); }
+        else if (W.carp === 'jig') { section('Kaat ka type'); const r = rowEl(true); [['slope', '◢ Tirchha (slope / chhat)'], ['round', '◠ Gol (quarter round)']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.jigMode = k; buildTerrainDock(); }, W.jigMode === k))); widthSl('Kitne blocks ki line (dono taraf)'); note('Face par jahan tap karoge wahan se sabse nazdeeki kinare tak tirchha / gol kat banta hai. Kinare ke paas tap = chhota kat, door tap = bada kat.'); }
+        else { section('Chisel ka shape'); const r = rowEl(true); [['square', '▪ Chorus gadda'], ['round', '● Gol'], ['v', '▼ V-khancha']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.chiMode = k; buildTerrainDock(); }, W.chiMode === k)));
+          const s1 = mkSlider(1, 4, 1, W.chiSize | 0, v => { W.chiSize = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)'), s2 = mkSlider(1, 4, 1, W.chiDepth | 0, v => { W.chiDepth = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)');
+          dock.appendChild(mkFieldGrid([mkField('📐', 'Size', s1), mkField('⬇', 'Gehrai', s2)], 2)); note('Ungli block par rakh kar chalao: chisel apni jagah ek baar kaat ta hai, ungli aage badhaoge to khancha banta jayega. Wahi jagah dobara tap karoge to aur gehra jayega. Camera ghumane ke liye Orbit button.'); }
       }
       else if (W.tool === 'dig' || W.tool === 'fill') {
         section(W.tool === 'dig' ? '🕳 Dig Pit in Ground' : '⛰ Raise / Fill Ground');
@@ -33404,7 +33698,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     function tick() { const vis = !!(terrainRoot && terrainRoot.parent && workspace === 'terrain' && W.show); if (group.visible !== vis) { group.visible = vis; requestRender(); } }
     window.__forgeVoxelTick = tick;
     function onMode(m) { if (m === 'voxel') { try { if (window.ForgeTerrainGame && !window.ForgeTerrainGame.noAuto && autoOpenOn()) setTimeout(() => { try { window.ForgeTerrainGame.open(); } catch (e) { console.error('Terrain Game open failed', e); } }, 150); } catch (e) { } applyCam(); updateSelBox(); buildPasteGhost(); } else { if (stroke) strokeEnd(); hideGhost(); selBox.visible = selFill.visible = false; if (pasteGhost) { group.remove(pasteGhost); pasteGhost = null; } requestRender(); } }
-    return { buildTab, sizeUI, setBlockSize, getBlockSize: () => ensureS(), onMode, tick, serialize, load, cameraOn: toolIsCamera, applyCam, _w: W, _t: { orient: orientId, rubList, sandResetList, rubWasNear: () => rubNear, gritRate, smoothable, SM_MAX, SM_GRIT, toggleList, breakList, mateId, normalizeInv, setHot, doReplace, INV_N, PREMADE, digAt, gridInfo, groundY, groundEdit, bake, ensureS, vxInRange, applyCh, env: { scene, renderer, toast, requestRender, workspace: () => workspace, size: () => (typeof TERRAIN_SIZE === 'number' && TERRAIN_SIZE > 0 ? TERRAIN_SIZE : 16), groundMeshes, key: vxKey, dda: vxDDA, defCanvas, scheduleSave } } };
+    return { buildTab, sizeUI, setBlockSize, getBlockSize: () => ensureS(), onMode, tick, serialize, load, cameraOn: toolIsCamera, applyCam, _w: W, _t: { orient: orientId, carpAct, carpMsg: () => carpMsg, rubList, sandResetList, rubWasNear: () => rubNear, gritRate, smoothable, SM_MAX, SM_GRIT, toggleList, breakList, mateId, normalizeInv, setHot, doReplace, INV_N, PREMADE, digAt, gridInfo, groundY, groundEdit, bake, ensureS, vxInRange, applyCh, env: { scene, renderer, toast, requestRender, workspace: () => workspace, size: () => (typeof TERRAIN_SIZE === 'number' && TERRAIN_SIZE > 0 ? TERRAIN_SIZE : 16), groundMeshes, key: vxKey, dda: vxDDA, defCanvas, scheduleSave } } };
   })();
   window.VoxelBuild = VoxelBuild;
   function buildVoxelTab() { if (terrainMode !== 'voxel') { setTerrainMode('voxel'); return; } VoxelBuild.buildTab(); } // opened via Tool Hub / saved tab → switch mode first (setTerrainMode rebuilds the dock itself)
@@ -37474,11 +37768,12 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const t0 = window.__forgeVoxelTick; window.__forgeVoxelTick = function () { try { if (t0) t0.apply(this, arguments); } catch (e) { } const v = E.workspace() === 'terrain'; if (grp.visible !== v) { grp.visible = v; E.requestRender(); } };
       return { grp, data, mesh: id => meshes.get(id), SHAPES, isA, eff, loadAsset, geo, mat, put, add, remove, clear, ser, load, rc, floor, hitUp, solid, ext, cl, isSc, isClay, scInst, scGet, scSet, scReset, scBrush, scSer, scLoad, scThumb };
     })();
-    // ---- INVENTORY store (v13-3): backpack of 36 items + 9 hotbar items; item = {k:'b',id} block or {k:'p',s,m,z,r} free piece ----
-    const IV = { back: new Array(36).fill(null), hot: new Array(9).fill(null), init: false,
+    // ---- INVENTORY store (v13-3): backpack of 120 items + 9 hotbar items; item = {k:'b',id} block or {k:'p',s,m,z,r} free piece ----
+    const INV_N = 120; // backpack size (was 36)
+    const IV = { back: new Array(INV_N).fill(null), hot: new Array(9).fill(null), init: false,
       ensure() { if (!this.init) { this.hot = W.hot.map(id => id ? { k: 'b', id } : null); this.init = true; } },
       ser() { this.ensure(); return { b: this.back, h: this.hot }; },
-      load(o) { const nsw = x => (x && x.k === 't') ? null : (x && x.k === 'p' && x.s === 'clay') ? Object.assign({}, x, { s: 'cube', n: '🧊 Block' }) : x; if (o && Array.isArray(o.b) && Array.isArray(o.h)) { o = { b: o.b.map(nsw), h: o.h.map(nsw) }; this.back = o.b.slice(0, 36); while (this.back.length < 36) this.back.push(null); this.hot = o.h.slice(0, 9); while (this.hot.length < 9) this.hot.push(null); this.init = true; } } };
+      load(o) { const nsw = x => (x && x.k === 't') ? null : (x && x.k === 'p' && x.s === 'clay') ? Object.assign({}, x, { s: 'cube', n: '🧊 Block' }) : x; if (o && Array.isArray(o.b) && Array.isArray(o.h)) { o = { b: o.b.map(nsw), h: o.h.map(nsw) }; this.back = o.b.slice(0, INV_N); while (this.back.length < INV_N) this.back.push(null); this.hot = o.h.slice(0, 9); while (this.hot.length < 9) this.hot.push(null); this.init = true; } } };
     // ---- storage (IndexedDB; never claims success unless it really saved) ----
     const idb = () => new Promise((res, rej) => { try { const r = indexedDB.open(DBN, 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(OS)) r.result.createObjectStore(OS, { keyPath: 'owner' }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error || new Error('IndexedDB open failed')); } catch (e) { rej(e); } });
     const idbGet = () => idb().then(db => new Promise((res, rej) => { const q = db.transaction(OS, 'readonly').objectStore(OS).get(MK); q.onsuccess = () => { db.close(); res(q.result || null); }; q.onerror = () => { db.close(); rej(q.error); }; }));
@@ -37534,7 +37829,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const _cbW = new WeakMap(), _NOB = [];
       // solid boxes of a block type in cell-local units (0..1), already turned by the block's rotation; same maths as boxGeo() so collision == what you see
       function colBoxes(t) {
-        const d = W.defs.get(t); if (!d) return _NOB; let r = _cbW.get(d); if (r) return r;
+        const d = W.defs.get(t); if (!d) return _NOB; { const rb = window.__realBoxes && window.__realBoxes(d); if (rb) return rb; } let r = _cbW.get(d); if (r) return r;
         if (d.passable) r = _NOB;
         else if (d.boxes) { const rot = (((d.rot | 0) % 4) + 4) % 4, c = [1, 0, -1, 0][rot], s = [0, 1, 0, -1][rot]; r = d.boxes.map(b => { const x0 = b[0] - .5, x1 = b[3] - .5, z0 = b[2] - .5, z1 = b[5] - .5, ax = x0 * c + z0 * s, az = -x0 * s + z0 * c, bx = x1 * c + z1 * s, bz = -x1 * s + z1 * c; return [Math.min(ax, bx) + .5, b[1], Math.min(az, bz) + .5, Math.max(ax, bx) + .5, b[4], Math.max(az, bz) + .5]; }); }
         else if (d.shape === 'slab') r = [[0, 0, 0, 1, .5, 1]]; else r = [[0, 0, 0, 1, 1, 1]];
@@ -37676,12 +37971,26 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       let jid = null; const jmove = e => { const r = jb.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2), l = Math.hypot(dx, dy) || 1, k = Math.min(1, l / (50 * (r.width / 130 || 1))); st.joy.x = dx / l * k; st.joy.y = dy / l * k; jk.style.transform = 'translate(' + st.joy.x * 40 + 'px,' + st.joy.y * 40 + 'px)'; };
       jb.onpointerdown = e => { e.stopPropagation(); e.preventDefault(); jid = e.pointerId; try { jb.setPointerCapture(jid); } catch (x) { } jmove(e); }; jb.onpointermove = e => { if (e.pointerId === jid) jmove(e); }; jb.onpointerup = jb.onpointercancel = e => { if (e.pointerId === jid) { jid = null; st.joy.x = st.joy.y = 0; jk.style.transform = ''; } };
       const hb = el('div', 'position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:3px;padding:4px;background:rgba(15,18,30,.6);border-radius:10px'); ov.appendChild(hb);
+      // ---- 🎒 SLIDE STRIP (v21): swipe sideways through EVERY block in the inventory; tap one = it goes into the selected hotbar slot ----
+      const strip = el('div', 'position:absolute;left:50%;bottom:calc(66px + env(safe-area-inset-bottom));transform:translateX(-50%);width:min(94vw,440px);display:none;gap:4px;padding:4px;background:rgba(15,18,30,.6);border-radius:10px;overflow-x:auto;overflow-y:hidden;touch-action:pan-x;-webkit-overflow-scrolling:touch'); ov.appendChild(strip);
+      ['pointerdown', 'touchstart', 'mousedown'].forEach(ev => strip.addEventListener(ev, e => e.stopPropagation()));
+      let stripKey = '';
+      function drawStrip() {
+        IV.ensure(); const items = IV.back.filter(Boolean); if (!items.length) { strip.style.display = 'none'; stripKey = ''; return; } strip.style.display = 'flex';
+        const key = items.map(x => JSON.stringify(x)).join('|'), cur = JSON.stringify(IV.hot[W.slot] || null);
+        if (key !== stripKey) {
+          stripKey = key; const keep = strip.scrollLeft; strip.textContent = '';
+          items.forEach(it => { const b = el('div', 'flex:0 0 auto;padding:2px;border-radius:7px;border:2px solid transparent;touch-action:pan-x'); b.dataset.sig = JSON.stringify(it); b.style.width = '46px'; b.style.textAlign = 'center'; b.appendChild(iconItem(it, 38)); b.appendChild(el('div', 'font-size:8px;line-height:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#dfe6ff', itName(it))); b.onclick = () => { IV.ensure(); IV.hot[W.slot] = PS.cl(it); useSlot(); drawHot(); E.scheduleSave(); pers(); }; strip.appendChild(b); });
+          strip.scrollLeft = keep;
+        }
+        Array.prototype.forEach.call(strip.children, b => { const on = b.dataset.sig === cur; b.style.borderColor = on ? '#8aa2ff' : 'transparent'; b.style.background = on ? 'rgba(120,140,255,.35)' : 'transparent'; });
+      }
       hudReg(jb, 'joystick', null); hudReg(hb, 'hotbar', null);
       mkBtn('🎛', sq + 'left:10px;top:max(64px,calc(env(safe-area-inset-top) + 64px));', () => hudOpen(), 0, true);
-      const icon = (id, sz) => { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;image-rendering:pixelated;border-radius:4px;'); c.width = c.height = 32; const d = W.defs.get(id); if (d) { try { const g2 = c.getContext('2d'); g2.imageSmoothingQuality = 'high'; g2.drawImage(E.defCanvas(d), 0, 0, 32, 32); } catch (e) { } } return c; };
+      const icon = (id, sz, flat) => { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;'); c.width = c.height = flat ? 32 : 64; const d = W.defs.get(id); if (d) { const g2 = c.getContext('2d'); try { if (flat) throw 0; g2.globalAlpha = d.opacity < 1 ? Math.max(.6, d.opacity) : 1; window.__isoCube(g2, E.defCanvas(d), 64, d.shape === 'slab', true); } catch (e) { try { g2.globalAlpha = 1; g2.imageSmoothingQuality = 'high'; g2.drawImage(E.defCanvas(d), 0, 0, c.width, c.height); } catch (e2) { } } } return c; };
       drawHot();
       function panel(title) { const m = el('div', 'position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:5;touch-action:none'), c = el('div', 'background:#171b2b;border:1px solid #3a4160;border-radius:14px;padding:14px;max-width:92vw;max-height:80vh;overflow:auto;min-width:240px'); c.appendChild(el('div', 'font-weight:700;margin-bottom:10px', title)); m.appendChild(c); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } }; ov.appendChild(m); return [m, c]; }
-      function openMenu() { if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('⏸ Terrain Game'); [['▶ Resume', () => { m.remove(); st.menu = false; }], ['⛰ Place on Ground: ' + (W.onGround ? 'ON ✓' : 'OFF') + ' (tap = badlo)', () => { W.onGround = !W.onGround; m.remove(); st.menu = false; E.toast(W.onGround ? '⛰ Ab block / piece zameen ke UPAR rakhe jaayenge' : 'Place on Ground OFF — old behavior', 2000); }], ['🧗 Block par auto-chadhna: ' + (W.autoStep ? 'ON' : 'OFF (block se takrao, ⤒ se kudo)') + ' (tap = badlo)', () => { W.autoStep = !W.autoStep; applyChar(); m.remove(); st.menu = false; E.toast(W.autoStep ? '🧗 Auto-chadhna ON — chhote block apne aap chadh jaoge' : '🧱 Auto-chadhna OFF — block se takraoge, upar jaane ke liye ⤒ kudo (aadha block slab chadh sakte ho)', 2600); }], ['🎛 HUD / buttons badlo (move, size, copy)', () => { m.remove(); st.menu = false; hudOpen(); }], ['💾 Save now', () => { persist(); }], ['🚪 Exit (map jaisa banaya waisa hi rahega)', () => close()]].forEach(([t, f]) => { const b = el('div', 'padding:12px 14px;margin:6px 0;border-radius:10px;background:#2a3150;text-align:center', t); b.onpointerdown = e => { e.stopPropagation(); f(); }; c.appendChild(b); }); c.appendChild(el('div', 'font-size:11px;opacity:.7;margin-top:6px', 'Har block rakhte hi apne aap save hota hai. Dobara kholne par sab waisa hi milega.')); }
+      function openMenu() { if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('⏸ Terrain Game'); [['▶ Resume', () => { m.remove(); st.menu = false; }], ['✨ Texture Enhancer (slider)', () => { m.remove(); st.menu = false; if (window.RealLife) window.RealLife.panel(); }], ['🌍 Real-Life Mode: ' + (window.RealLife && window.RealLife.on() ? 'ON' : 'OFF') + ' (tap = badlo)', () => { if (window.RealLife) window.RealLife.set(!window.RealLife.on()); m.remove(); st.menu = false; }], ['⛰ Place on Ground: ' + (W.onGround ? 'ON ✓' : 'OFF') + ' (tap = badlo)', () => { W.onGround = !W.onGround; m.remove(); st.menu = false; E.toast(W.onGround ? '⛰ Ab block / piece zameen ke UPAR rakhe jaayenge' : 'Place on Ground OFF — old behavior', 2000); }], ['🧗 Block par auto-chadhna: ' + (W.autoStep ? 'ON' : 'OFF (block se takrao, ⤒ se kudo)') + ' (tap = badlo)', () => { W.autoStep = !W.autoStep; applyChar(); m.remove(); st.menu = false; E.toast(W.autoStep ? '🧗 Auto-chadhna ON — chhote block apne aap chadh jaoge' : '🧱 Auto-chadhna OFF — block se takraoge, upar jaane ke liye ⤒ kudo (aadha block slab chadh sakte ho)', 2600); }], ['🎛 HUD / buttons badlo (move, size, copy)', () => { m.remove(); st.menu = false; hudOpen(); }], ['💾 Save now', () => { persist(); }], ['🚪 Exit (map jaisa banaya waisa hi rahega)', () => close()]].forEach(([t, f]) => { const b = el('div', 'padding:12px 14px;margin:6px 0;border-radius:10px;background:#2a3150;text-align:center', t); b.onpointerdown = e => { e.stopPropagation(); f(); }; c.appendChild(b); }); c.appendChild(el('div', 'font-size:11px;opacity:.7;margin-top:6px', 'Har block rakhte hi apne aap save hota hai. Dobara kholne par sab waisa hi milega.')); }
       // ===== FREE PIECES: brush, ghost, select, edit panel, library (v13-2) =====
       const D2 = Math.PI / 180, pers = () => { try { window.__forgeVoxelPersist && window.__forgeVoxelPersist(); } catch (e) { } }, BIG = Math.max(.5, S * 2);
       st.mode = 'grid'; st.sel = null; st.br = { s: 'cube', z: [BIG, BIG, BIG], r: [0, 0, 0], lift: 0, snap: .05, uni: true };
@@ -37691,18 +38000,18 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       mkBtn('🎯', 'right:18px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', () => pcSelect());
       // ---- 🪚 SANDPAPER (v17): real rubbing. Crosshair near an edge / corner of a block, hold 🪚 = that edge wears down a little at a time; ⚙ = paper grit / brush ----
       function doSand() {
-        const a = aim(); if (!a) return; if (a.kind !== 'v') { E.toast('Crosshair block ke kinare par rakho — 🪚 sandpaper blocks par chalta hai', 1500); return; }
-        const reset = W.sandMode === 'reset', l = reset ? T.sandResetList(a.cell, W.sandR) : T.rubList(a.point, a.cell, W.sandR, T.gritRate(W.sandGrit));
-        if (!l.length) { if (reset) E.toast('Previously sharp edge', 900); else if (!T.rubWasNear()) E.toast('Kinare / kone ke paas crosshair rakho — face ke beech mein nahi ghista', 1100); return; } edit(l);
+        const a = aim(); if (!a) return; if (a.kind !== 'v') { E.toast('Crosshair kisi block par rakho — 🪚 sandpaper blocks par chalta hai', 1500); return; }
+        const reset = W.sandMode === 'reset', l = reset ? T.sandResetList(a.cell, W.sandR) : T.rubList(a.point, a.cell, W.sandR, T.gritRate(W.sandGrit), [a.place[0] - a.cell[0], a.place[1] - a.cell[1], a.place[2] - a.cell[2]]);
+        if (!l.length) { if (reset) E.toast('Previously sharp edge', 900); else if (!T.rubWasNear()) E.toast('Yahan ghisne layak khula hissa nahi mila — crosshair block par rakho', 1100); return; } edit(l);
       }
       function openSand() {
         if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('🪚 Sandpaper'); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } };
         const row = () => { const r = el('div', 'display:flex;gap:6px;margin:6px 0;flex-wrap:wrap'); c.appendChild(r); return r; };
         const chip = (r, t, on, f) => { const b = el('div', 'padding:8px 12px;border-radius:8px;text-align:center;flex:1;min-width:64px;background:' + (on ? '#4a5bff' : '#2a3150'), t); b.onpointerdown = e => { e.stopPropagation(); f(); m.remove(); st.menu = st.inv = false; openSand(); }; r.appendChild(b); };
-        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block ke KINARE ya KONE ke paas rakho aur 🪚 dabaye rakho — kinara dheere dheere gol hota hai (asli sandpaper jaisa). Face ke beech mein kuch nahi hota. Sirf bahar ke kinare ghisate hain.'));
+        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block par rakho aur 🪚 dabaye rakho. Kinare / kone ke paas = kinara gol hota hai. Face ke BEECH mein = surface ghista hai (ek block ka max 25%). Zyada hatana ho to 🕳 Poora ghiso ya 🛠 Carpentry.'));
         c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Kaagaz (grit)'));
         c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Kaam ka tareeka'));
-        { const r = row(); chip(r, '🔘 Sirf kinare gol', W.sandMode === 'smooth', () => { W.sandMode = 'smooth'; }); chip(r, '🕳 Poora ghiso (block khatam)', W.sandMode === 'erase', () => { W.sandMode = 'erase'; }); }
+        { const r = row(); chip(r, '🔘 Kinare gol + beech ghisai', W.sandMode === 'smooth', () => { W.sandMode = 'smooth'; }); chip(r, '🕳 Poora ghiso (block khatam)', W.sandMode === 'erase', () => { W.sandMode = 'erase'; }); }
         { const r = row(); Object.keys(T.SM_GRIT).forEach(g => chip(r, T.SM_GRIT[g].l, W.sandMode !== 'reset' && W.sandGrit === g, () => { W.sandGrit = g; if (W.sandMode === 'reset') W.sandMode = 'smooth'; })); }
         { const r = row(); chip(r, '↩ Reset: restore sharpened edge', W.sandMode === 'reset', () => { W.sandMode = W.sandMode === 'reset' ? 'smooth' : 'reset'; }); }
         c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', 'Brush'));
@@ -37712,6 +38021,33 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       }
       mkBtn('🪚', 'right:84px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doSand, () => 90);
       mkBtn('⚙', 'right:150px;bottom:calc(244px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openSand());
+      // ---- 🪵 CARPENTRY (v20): Aari / Circular saw / Jigsaw / Chisel — aim the crosshair at a block, 🛠 = use, 🪵 = choose tool ----
+      function doCarp() {
+        if (st.mode === 'free') { E.toast('Carpentry grid blocks par chalti hai — 🧱 se grid mode lo', 1600); return; }
+        const a = aim(); if (!a) return; if (a.kind !== 'v') { E.toast('Crosshair kisi bane hue block par rakho', 1300); return; }
+        const l = T.carpAct(a.cell, a.point, [a.place[0] - a.cell[0], a.place[1] - a.cell[1], a.place[2] - a.cell[2]]);
+        if (!l.length) { const m = T.carpMsg(); if (m) E.toast(m, 1500); return; } edit(l);
+      }
+      function openCarp() {
+        if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('🪵 Carpentry'); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } };
+        const row = () => { const r = el('div', 'display:flex;gap:6px;margin:6px 0;flex-wrap:wrap'); c.appendChild(r); return r; };
+        const chip = (r, t, on, f) => { const b = el('div', 'padding:8px 12px;border-radius:8px;text-align:center;flex:1;min-width:64px;background:' + (on ? '#4a5bff' : '#2a3150'), t); b.onpointerdown = e => { e.stopPropagation(); f(); m.remove(); st.menu = st.inv = false; openCarp(); }; r.appendChild(b); };
+        const h = t => c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', t));
+        const step = (lbl, key, lo, hi, fmt) => { const r = row(); chip(r, '−', false, () => { W[key] = Math.max(lo, (W[key] | 0) - 1); }); chip(r, lbl + ': ' + fmt(W[key] | 0), true, () => { }); chip(r, '+', false, () => { W[key] = Math.min(hi, (W[key] | 0) + 1); }); };
+        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block par rakho aur 🛠 dabao. Har block 8×8×8 tukdon ka hai — aadha, chauthai, tirchha, gol, khancha sab kat sakta hai. Kata hua block save, undo, copy/paste, export sab mein chalta hai.'));
+        h('Tool'); { const r = row(); [['saw', '🪚 Aari'], ['circ', '⭕ Circular'], ['jig', '〰 Jigsaw'], ['chisel', '🔨 Chisel']].forEach(([k, l]) => chip(r, l, W.carp === k, () => { W.carp = k; })); }
+        if (W.carp === 'saw' || W.carp === 'circ') {
+          h('Disha'); { const r = row(); [['auto', '🧭 Auto'], ['x', '⬌ X'], ['y', '⬍ Y'], ['z', '⤢ Z']].forEach(([k, l]) => chip(r, l, W.sawAxis === k, () => { W.sawAxis = k; })); }
+          h('Kaun sa hissa hatana'); { const r = row(); [['small', 'Chhota'], ['plus', '+ taraf'], ['minus', '− taraf']].forEach(([k, l]) => chip(r, l, W.sawRm === k, () => { W.sawRm = k; })); }
+        }
+        if (W.carp === 'circ') { step('Chaudai ±', 'cutW', 0, 16, v => v + ' blk'); step('Gehrai', 'cutD', 1, 8, v => v + ' blk'); }
+        if (W.carp === 'jig') { h('Kaat'); { const r = row(); [['slope', '◢ Tirchha'], ['round', '◠ Gol']].forEach(([k, l]) => chip(r, l, W.jigMode === k, () => { W.jigMode = k; })); } step('Lambai ±', 'cutW', 0, 16, v => v + ' blk'); }
+        if (W.carp === 'chisel') { h('Shape'); { const r = row(); [['square', '▪ Chorus'], ['round', '● Gol'], ['v', '▼ V']].forEach(([k, l]) => chip(r, l, W.chiMode === k, () => { W.chiMode = k; })); } step('Size', 'chiSize', 1, 4, v => v + '/8'); step('Gehrai', 'chiDepth', 1, 4, v => v + '/8'); }
+        const cl = el('div', 'padding:10px;border-radius:8px;text-align:center;background:#2a3150;margin-top:10px', 'Close'); cl.onpointerdown = e => { e.stopPropagation(); m.remove(); st.menu = st.inv = false; }; c.appendChild(cl);
+      }
+      mkBtn('🛠', 'right:18px;bottom:calc(298px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doCarp, () => (W.carp === 'chisel' ? 110 : 600000));
+      mkBtn('🪵', 'right:84px;bottom:calc(306px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openCarp());
+      window.__forgeCutRefs = () => { const r = []; try { IV.back.concat(IV.hot).forEach(it => { if (it) { if (it.id) r.push(it.id); if (it.m) r.push(it.m); } }); } catch (e) { } return r; };
       // ---- 📏 SIZE PANEL: dig size / depth / shape + block size (v13-6) ----
       if (!W._gameDig) { W._gameDig = 1; W.digSize = 1; W.digDepth = 1; } // first time: small hole (1 block) instead of the big Build-tab default
       mkBtn('📏', sq + 'right:172px;top:max(64px,calc(env(safe-area-inset-top) + 64px));', () => openSizes());
@@ -37841,11 +38177,11 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         if (it && it.k === 'p' && it.thumb) { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;background:#2d3452'), g = c.getContext('2d'); c.width = c.height = 32; const im = new Image(); im.onload = () => { try { g.drawImage(im, 0, 0, 32, 32); } catch (e) { } }; im.src = it.thumb; return c; }
         return null;
       }
-      function iconItem(it, sz) { const xx = iconX(it, sz); if (xx) return xx; if (it && it.k === 'p' && PS.isA(it.s)) { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;background:#2d3452'), g = c.getContext('2d'); c.width = c.height = 32; const rec = libraryAssets.find(r => String(r.id) === it.s.slice(2)); if (rec && rec.thumb) { const im = new Image(); im.onload = () => { try { g.drawImage(im, 0, 0, 32, 32); } catch (e) { } }; im.src = rec.thumb; } else { g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('📦', 16, 17); } return c; } if (!it) { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;background:rgba(255,255,255,.07)'); c.width = c.height = 32; return c; } if (it.k === 'b') return icon(it.id, sz); const c = icon(it.m, sz), g = c.getContext('2d'); g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(0, 0, 32, 32); g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(((PS.SHAPES.find(x => x[0] === it.s) || ['', '🧩'])[1]).split(' ')[0], 16, 17); return c; }
+      function iconItem(it, sz) { const xx = iconX(it, sz); if (xx) return xx; if (it && it.k === 'p' && PS.isA(it.s)) { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;background:#2d3452'), g = c.getContext('2d'); c.width = c.height = 32; const rec = libraryAssets.find(r => String(r.id) === it.s.slice(2)); if (rec && rec.thumb) { const im = new Image(); im.onload = () => { try { g.drawImage(im, 0, 0, 32, 32); } catch (e) { } }; im.src = rec.thumb; } else { g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('📦', 16, 17); } return c; } if (!it) { const c = el('canvas', 'width:' + sz + 'px;height:' + sz + 'px;border-radius:4px;background:rgba(255,255,255,.07)'); c.width = c.height = 32; return c; } if (it.k === 'b') return icon(it.id, sz); const c = icon(it.m, sz, true), g = c.getContext('2d'); g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(0, 0, 32, 32); g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(((PS.SHAPES.find(x => x[0] === it.s) || ['', '🧩'])[1]).split(' ')[0], 16, 17); return c; }
       const itName = it => !it ? 'Empty' : (it.k === 'p' && it.n && !PS.isA(it.s)) ? it.n : (it.k === 'p' && PS.isA(it.s)) ? (it.n || ((libraryAssets.find(r => String(r.id) === it.s.slice(2)) || {}).name) || 'Object') : it.k === 'b' ? ((W.defs.get(it.id) || {}).name || 'Block') : (((PS.SHAPES.find(x => x[0] === it.s) || ['', '🧩 Piece'])[1]).split(' ').slice(1).join(' ') + ' · ' + ((W.defs.get(it.m) || {}).name || ''));
       function useSlot() { IV.ensure(); const it = IV.hot[W.slot]; if (!it) return; let want; if (it.k === 'b') { W.hot[W.slot] = it.id; want = 'grid'; } else { W.hot[W.slot] = it.m; st.br.s = it.s; st.br.z = it.z.slice(); st.br.r = it.r.slice(); want = 'free'; } if (st.mode !== want) setMode(want); updToolHud(); }
-      function drawHot() { IV.ensure(); updToolHud(); hb.textContent = ''; const sz = Math.min(34, Math.floor((innerWidth - 40) / 9 - 8)); for (let i = 0; i < 9; i++) { const b = el('div', 'padding:2px;border-radius:7px;border:2px solid ' + (i === W.slot ? '#8aa2ff' : 'transparent') + ';background:' + (i === W.slot ? 'rgba(120,140,255,.35)' : 'transparent') + ';touch-action:none'); b.appendChild(iconItem(IV.hot[i], sz)); b.onpointerdown = e => { e.stopPropagation(); e.preventDefault(); W.slot = i; useSlot(); drawHot(); E.scheduleSave(); pers(); }; hb.appendChild(b); } }
-      function addInv(it) { IV.ensure(); { const sig = JSON.stringify(it); if (IV.back.some(x => x && JSON.stringify(x) === sig)) { E.toast('Ye pehle se inventory mein hai', 1200); return true; } } const k = IV.back.indexOf(null); if (k < 0) { E.toast('Inventory bhar gaya (36) — pehle kuch hatao', 1800); return false; } IV.back[k] = PS.cl(it); if (!IV.hot[W.slot]) { IV.hot[W.slot] = PS.cl(it); useSlot(); drawHot(); } pers(); E.toast('🎒 Inventory mein aa gaya: ' + itName(it), 1300); return true; }
+      function drawHot() { IV.ensure(); updToolHud(); hb.textContent = ''; const sz = Math.min(34, Math.floor((innerWidth - 40) / 9 - 8)); for (let i = 0; i < 9; i++) { const b = el('div', 'padding:2px;border-radius:7px;border:2px solid ' + (i === W.slot ? '#8aa2ff' : 'transparent') + ';background:' + (i === W.slot ? 'rgba(120,140,255,.35)' : 'transparent') + ';touch-action:none'); b.appendChild(iconItem(IV.hot[i], sz)); b.onpointerdown = e => { e.stopPropagation(); e.preventDefault(); W.slot = i; useSlot(); drawHot(); E.scheduleSave(); pers(); }; hb.appendChild(b); } drawStrip(); }
+      function addInv(it) { IV.ensure(); { const sig = JSON.stringify(it); if (IV.back.some(x => x && JSON.stringify(x) === sig)) { E.toast('Ye pehle se inventory mein hai', 1200); return true; } } const k = IV.back.indexOf(null); if (k < 0) { E.toast('Inventory bhar gaya (' + INV_N + ') — pehle kuch hatao', 1800); return false; } IV.back[k] = PS.cl(it); if (!IV.hot[W.slot]) { IV.hot[W.slot] = PS.cl(it); useSlot(); drawHot(); } pers(); E.toast('🎒 Inventory mein aa gaya: ' + itName(it), 1300); return true; }
       const SIZES = [['Smaller 0.25', [.25, .25, .25]], ['Medium 0.5', [.5, .5, .5]], ['1 m', [1, 1, 1]], ['2 m', [2, 2, 2]], ['Deewar 2×2×0.2', [2, 2, .2]], ['Farsh 2×0.1×2', [2, .1, 2]], ['Pillar 0.3×2×0.3', [.3, 2, .3]], ['Beam 2×0.2×0.2', [2, .2, .2]]];
       function openInv() {
         if (st.menu || st.inv) return; st.inv = true; IV.ensure(); const [m, c] = panel('🎒 Inventory & 📚 Library'); c.style.width = 'min(92vw,430px)'; let tab = 'a', del = false, mat = 1, sizeI = 1, q = ''; const body = el('div'); c.appendChild(body);
@@ -37882,7 +38218,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
           }
           let n = 0; for (const x of fresh) { const i = IV.back.indexOf(null); if (i < 0) break; IV.back[i] = PS.cl(x); n++; }
           if (n && !IV.hot[W.slot]) { IV.hot[W.slot] = PS.cl(fresh[0]); useSlot(); drawHot(); }
-          pers(); E.toast(n < fresh.length ? '🎒 ' + n + ' items aa gaye — inventory bhar gaya (36), ' + (fresh.length - n) + ' nahi aa sake' : '🎒 ' + n + ' items inventory mein aa gaye', 2200);
+          pers(); E.toast(n < fresh.length ? '🎒 ' + n + ' items aa gaye — inventory bhar gaya (' + INV_N + '), ' + (fresh.length - n) + ' nahi aa sake' : '🎒 ' + n + ' items inventory mein aa gaye', 2200);
           if (m.isConnected) render();
         };
         const render = () => {
@@ -38143,6 +38479,145 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
   var btn = document.getElementById('btn-menu');
   if (btn) btn.onclick = open;
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+</script>
+<script id="realLifeMode">
+(function(){'use strict';
+if(window.RealLife)return;
+const T=THREE,KEY='forgeRealLife',VF=1e6,NZ=8192,NY=2048,OX=4096,OZ=4096,OY=1024;
+let on=false,rg=null,sig='',lastB=0,btn=null,lastBtn='';
+try{on=localStorage.getItem(KEY)==='1'}catch(e){}
+const vb=()=>{const v=window.VoxelBuild;return v&&v._w&&v._t&&v._t.env?v:null};
+const rnd=s=>()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
+const M=(x,y,z,rx,ry,rz,sx,sy,sz)=>new T.Matrix4().compose(new T.Vector3(x||0,y||0,z||0),new T.Quaternion().setFromEuler(new T.Euler(rx||0,ry||0,rz||0)),new T.Vector3(sx==null?1:sx,sy==null?1:sy,sz==null?1:sz));
+const B=(w,h,d)=>new T.BoxGeometry(w,h,d);
+function mg(parts){const P=[],N=[],U=[],C=[],c=new T.Color();
+ parts.forEach(q=>{let g=q[0];g=g.index?g.toNonIndexed():g.clone();if(q[1])g.applyMatrix4(q[1]);
+  const p=g.attributes.position.array,n=g.attributes.normal.array,u=g.attributes.uv?g.attributes.uv.array:null,cn=g.attributes.position.count;
+  if(q[2]!=null)c.set(q[2]);else c.setRGB(1,1,1);
+  for(let i=0;i<p.length;i++){P.push(p[i]);N.push(n[i])}
+  for(let i=0;i<cn;i++){const ao=.78+.22*Math.min(1,Math.max(0,p[i*3+1]+.5));U.push(u?u[i*2]:0,u?u[i*2+1]:0);C.push(c.r*ao,c.g*ao,c.b*ao)}});
+ const o=new T.BufferGeometry();
+ o.setAttribute('position',new T.Float32BufferAttribute(P,3));o.setAttribute('normal',new T.Float32BufferAttribute(N,3));
+ o.setAttribute('uv',new T.Float32BufferAttribute(U,2));o.setAttribute('color',new T.Float32BufferAttribute(C,3));return o}
+function blob(x,z,r,sy,amp,sd,det,col){const g=new T.IcosahedronGeometry(1,det||3),p=g.attributes.position;
+ for(let i=0;i<p.count;i++){const a=p.getX(i),b=p.getY(i),c=p.getZ(i),n=Math.sin(a*3+sd)*Math.sin(b*4+sd*1.7)*Math.sin(c*3.5+sd*.6)+.5*Math.sin(a*9+c*8+sd)*Math.sin(b*8-sd),k=r*(1+amp*n);p.setXYZ(i,a*k,Math.max(b*k*sy,-r*sy*.55),c*k)}
+ g.computeVertexNormals();return[g,M(x,-.5+r*sy*.55,z),col]}
+// ---------- procedural real-world textures + materials ----------
+const TX={},MT={};
+function tex(k){if(TX[k])return TX[k];const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d'),r=rnd(k.length*977+5);
+ g.fillStyle='#d2d2d2';g.fillRect(0,0,256,256);for(let i=0;i<46;i++){const v=120+r()*130|0;g.fillStyle='rgba('+v+','+v+','+v+',.13)';g.beginPath();g.arc(r()*256,r()*256,10+r()*34,0,6.3);g.fill()}const st=(k==='wood'||k==='bark')?14:2;
+ for(let i=0;i<7000;i++){const v=140+r()*115|0;g.fillStyle='rgba('+v+','+v+','+v+',.55)';g.fillRect(r()*256,r()*256,1+r()*2,1+r()*st)}
+ if(st>2||k==='metal'||k==='stone')for(let i=0;i<(k==='stone'?9:28);i++){g.strokeStyle='rgba(40,30,20,'+(.12+r()*.18)+')';g.beginPath();let x=r()*256,y=r()*256;g.moveTo(x,y);for(let j=0;j<5;j++){if(k==='metal'){x+=26;y+=r()*2-1}else if(k==='stone'){x+=r()*30-15;y+=r()*30-15}else{y+=26;x+=Math.sin(j+i)*3}g.lineTo(x,y)}g.stroke()}
+ if(k==='conc'){g.fillStyle='rgba(30,30,30,.55)';[[40,40],[216,40],[40,216],[216,216]].forEach(p=>{g.beginPath();g.arc(p[0],p[1],7,0,6.3);g.fill()})}
+ const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;t.encoding=T.sRGBEncoding;t.anisotropy=4;return TX[k]=t}
+const TU={value:0};let HS=0,enh=1;try{const q=parseFloat(localStorage.getItem('forgeTexEnh'));if(q>=0&&q<=3)enh=q}catch(e){}
+function ER(m){const u=m.userData;m.bumpScale=u.bs0*enh;m.roughness=Math.max(.03,Math.min(1,u.r0*(1-.1*(enh-1))))}
+function fin(l,m){m.userData.bs0=m.bumpScale;m.userData.r0=m.roughness;ER(m);
+ if(l.sw){HS=1;m.customProgramCacheKey=()=>'rlsw';m.onBeforeCompile=sh=>{sh.uniforms.uT=TU;sh.vertexShader='uniform float uT;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n#ifdef USE_INSTANCING\ntransformed.x+=sin(uT*1.7+instanceMatrix[3].x*1.3+position.y*5.0)*0.035*max(position.y+0.5,0.0);\ntransformed.z+=cos(uT*1.3+instanceMatrix[3].z*1.1+position.x*5.0)*0.025*max(position.y+0.5,0.0);\n#endif')}}return m}
+function mat(l){const k=[l.tx,l.c,l.r,l.m,l.o,l.em,l.ds,l.sw].join();
+ return MT[k]||(MT[k]=fin(l,new T.MeshStandardMaterial({map:tex(l.tx||'n'),bumpMap:tex(l.tx||'n'),bumpScale:l.tx==='n'?.4:1.4,color:l.c||'#ffffff',roughness:l.r==null?.9:l.r,metalness:l.m||0,vertexColors:true,transparent:l.o<1,opacity:l.o==null?1:l.o,depthWrite:!(l.o<1),side:l.ds?T.DoubleSide:T.FrontSide,emissive:l.em||'#000000',emissiveIntensity:l.em?1.1:0})))}
+// ---------- real-life objects: g = geometry layers (unit cell, centred), b = REAL collision boxes (cell-local 0..1) ----------
+const FULL=[[.01,0,.01,.99,1,.99]],W1=g=>mg([[g]]);
+const K={
+rock:{g:d=>{const a=rnd((d.id|0)*7+3),p=[blob(0,0,.46,.82,.2,a()*9)];for(let i=0;i<3;i++)p.push(blob((a()-.5)*.75,(a()-.5)*.75,.12+a()*.1,.8,.3,a()*9,2));const o=/obsid/i.test(d.name);return[{g:mg(p),tx:'stone',c:d.color,r:o?.12:.95,m:o?.3:0}]},b:()=>[[.08,0,.08,.92,.78,.92]]},
+mound:{g:d=>{const a=rnd((d.id|0)*5+1),p=[blob(0,0,.5,1.05,.1,a()*9)];for(let i=0;i<9;i++)p.push(blob((a()-.5)*.8,(a()-.5)*.8,.05+a()*.05,.8,.3,a()*9,1));return[{g:mg(p),tx:'n',c:d.color,r:1}]},b:()=>[[0,0,0,1,.62,1]]},
+grass:{g:d=>{const a=rnd(77),P=[],N=[],C=[],U=[],top=.2;
+ for(let i=0;i<380;i++){const x=(a()-.5)*.92,z=(a()-.5)*.92,h=.1+a()*.2,l=(a()-.5)*.1,w=.02,f=.7+a()*.5;P.push(x-w,top,z,x+w,top,z,x+l,top+h,z+l*.7);for(let j=0;j<3;j++){N.push(0,1,0);U.push(0,0)}C.push(.18*f,.35*f,.08*f,.18*f,.35*f,.08*f,.5*f,.75*f,.2*f)}
+ const o=new T.BufferGeometry();o.setAttribute('position',new T.Float32BufferAttribute(P,3));o.setAttribute('normal',new T.Float32BufferAttribute(N,3));o.setAttribute('uv',new T.Float32BufferAttribute(U,2));o.setAttribute('color',new T.Float32BufferAttribute(C,3));
+ return[{g:mg([blob(0,0,.5,.95,.07,3.3)]),tx:'n',c:'#7a5638',r:1},{g:o,tx:'n',c:'#ffffff',r:.8,ds:true,sw:1}]},b:()=>[[0,0,0,1,.76,1]]},
+leaves:{g:d=>{const a=rnd(9),p=[];for(let i=0;i<130;i++){const u=a()*6.28,v=Math.acos(2*a()-1),r=.1+a()*.34;p.push([new T.PlaneGeometry(.17,.1),M(r*Math.sin(v)*Math.cos(u),r*Math.cos(v),r*Math.sin(v)*Math.sin(u),a()*6,a()*6,a()*6),new T.Color().setHSL(.27+a()*.06,.55,.2+a()*.2).getHex()])}
+ for(let i=0;i<5;i++)p.push(blob((a()-.5)*.6,(a()-.5)*.6,.2,.8,.3,a()*9,1,0x2f5f22));return[{g:mg(p),tx:'n',c:'#ffffff',r:.8,ds:true,sw:1}]},b:()=>[]},
+log:{g:d=>{const a=rnd(4),sd=a()*9,cy=new T.CylinderGeometry(.44,.46,1,22,12,true),p=cy.attributes.position;
+ for(let i=0;i<p.count;i++){const x=p.getX(i),z=p.getZ(i),an=Math.atan2(z,x),k=1+.05*Math.sin(an*9+sd)*Math.sin(p.getY(i)*3+sd)+.025*Math.sin(an*23);p.setXYZ(i,x*k,p.getY(i),z*k)}
+ cy.computeVertexNormals();const bi=/birch/i.test(d.name),cc=bi?0xd9c9a0:0xc8a46c,q=[[cy,null,d.color]];
+ [.5,-.5].forEach((y,j)=>{for(let i=0;i<5;i++)q.push([new T.RingGeometry(i*.085+.001,(i+1)*.085,24),M(0,y,0,j?Math.PI/2:-Math.PI/2),i%2?0xa8844d:cc])});
+ return[{g:mg(q),tx:'bark',c:'#ffffff',r:.95}]},b:()=>[[.1,0,.28,.9,1,.72],[.28,0,.1,.72,1,.9]]},
+wood:{g:d=>{const a=rnd((d.id|0)+2),p=[];for(let i=0;i<5;i++){const c=.86+a()*.2;p.push([B(.985+a()*.015,.19,.99),M((a()-.5)*.01,-.4+i*.2,0),new T.Color(c,c*.97,c*.92).getHex()])}return[{g:mg(p),tx:'wood',c:d.color,r:.75}]},b:()=>FULL},
+brick:{g:d=>{const a=rnd((d.id|0)*3+1),p=[[B(.97,.99,.9),null,0xb8b1a2]],c=new T.Color(d.color);
+ for(let r=0;r<9;r++)for(let w=0;w<2;w++)for(let i=0;i<4;i++){const x=-.375+i*.25+((r&1)?.125:0);if(x>.38)continue;const f=.8+a()*.35;p.push([B(.235,.1,.44),M(x,-.5+.055+r*.111,-.25+w*.5),c.clone().multiplyScalar(f).getHex()])}
+ return[{g:mg(p),tx:'stone',c:'#ffffff',r:.9}]},b:()=>FULL},
+strata:{g:d=>{const a=rnd(5),p=[];for(let i=0;i<7;i++){const f=.85+a()*.25;p.push([B(.96+a()*.04,.138,.97+a()*.03),M((a()-.5)*.02,-.43+i*.143,0),new T.Color(f,f*.96,f*.88).getHex()])}return[{g:mg(p),tx:'stone',c:d.color,r:.95}]},b:()=>FULL},
+roof:{g:d=>{const a=rnd(8),sh=new T.Shape();sh.moveTo(-.5,-.5);sh.lineTo(.5,-.5);sh.lineTo(.5,.5);sh.lineTo(-.5,-.5);
+ const w=new T.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false});w.translate(0,0,-.5);w.rotateY(-Math.PI/2);const p=[[w,null,0x4a3a2e]],c=new T.Color(d.color);
+ for(let i=0;i<6;i++)for(let j=0;j<4;j++){const x=-.375+j*.25+((i&1)?.06:0),z=-.42+i*.17,f=.8+a()*.3;p.push([B(.235,.04,.24),M(x,z+.025,z,-Math.PI/4,0,0),c.clone().multiplyScalar(f).getHex()])}
+ return[{g:mg(p),tx:'stone',c:'#ffffff',r:.7}]},b:()=>[[0,0,0,1,.34,1],[0,.34,.33,1,.67,1],[0,.67,.66,1,1,1]]},
+floor:{g:d=>{const p=[[B(.99,.08,.99),M(0,-.46,0),0x8c8c8c]];for(let i=0;i<2;i++)for(let j=0;j<2;j++)p.push([B(.485,.1,.485),M(-.25+i*.5,-.45,-.25+j*.5),((i+j)&1)?0x202024:0xf2efe8]);return[{g:mg(p),tx:'stone',c:'#ffffff',r:.2,m:.05}]},b:()=>[[0,0,0,1,.1,1]]},
+glass:{g:d=>{const f=[];[[1,.06,.08,0,.47],[1,.06,.08,0,-.47],[.06,1,.08,.47,0],[.06,1,.08,-.47,0]].forEach(q=>f.push([B(q[0],q[1],q[2]),M(q[3],q[4],0)]));return[{g:mg(f),tx:'metal',c:'#9aa0a6',r:.4,m:.9},{g:W1(B(.94,.94,.018)),tx:'n',c:d.color,r:.03,m:.1,o:.28}]},b:()=>[[0,0,.45,1,1,.55]]},
+ice:{g:d=>{const a=rnd(12),p=[];for(let i=0;i<5;i++){const h=.5+a()*.5,r=.12+a()*.12;p.push([new T.ConeGeometry(r,h,6),M((a()-.5)*.6,-.5+h/2,(a()-.5)*.6,(a()-.5)*.35,a()*3,(a()-.5)*.35)])}p.push([new T.CylinderGeometry(.46,.5,.16,7),M(0,-.42,0)]);return[{g:mg(p),tx:'n',c:d.color,r:.05,m:.1,o:.7}]},b:()=>[[.1,0,.1,.9,.8,.9]]},
+water:{g:d=>{const s=new T.PlaneGeometry(1,1,14,14);s.rotateX(-Math.PI/2);const p=s.attributes.position;for(let i=0;i<p.count;i++)p.setY(i,.36+.018*Math.sin(p.getX(i)*17)*Math.cos(p.getZ(i)*13));s.computeVertexNormals();
+ return[{g:mg([[s]]),tx:'n',c:d.color,r:.08,m:.15,o:.62},{g:mg([[B(.99,.86,.99),M(0,-.07,0)]]),tx:'n',c:d.color,r:.2,o:.4}]},b:()=>[]},
+lamp:{g:d=>[{g:mg([[new T.CylinderGeometry(.2,.24,.08,12),M(0,-.46,0)],[new T.ConeGeometry(.24,.14,12),M(0,.26,0)],[new T.TorusGeometry(.12,.012,6,16),M(0,.38,0)],[B(.025,.5,.025),M(.19,-.2,.19)],[B(.025,.5,.025),M(-.19,-.2,.19)],[B(.025,.5,.025),M(.19,-.2,-.19)],[B(.025,.5,.025),M(-.19,-.2,-.19)]]),tx:'metal',c:'#2b2b2b',r:.4,m:.8},{g:W1(new T.CylinderGeometry(.18,.18,.48,14).translate(0,-.2,0)),tx:'n',c:d.color,r:.2,o:.9,em:d.color}],b:()=>[[.25,0,.25,.75,.85,.75]]},
+gem:{g:d=>{const a=rnd(31),p=[];for(let i=0;i<7;i++){const h=.4+a()*.5,r=.1+a()*.12;p.push([new T.OctahedronGeometry(r,0),M((a()-.5)*.7,-.5+h*.5,(a()-.5)*.7,(a()-.5)*.4,a()*3,(a()-.5)*.4,1,h/(2*r),1)])}return[{g:mg(p),tx:'n',c:d.color,r:.05,m:.2,o:.85}]},b:()=>[[.1,0,.1,.9,.8,.9]]},
+ingot:{g:d=>{const ig=B(.47,.23,.47),p=ig.attributes.position,q=[];for(let i=0;i<p.count;i++)if(p.getY(i)>0){p.setX(i,p.getX(i)*.82);p.setZ(i,p.getZ(i)*.82)}ig.computeVertexNormals();
+ for(let y=0;y<4;y++)for(let i=0;i<2;i++)for(let j=0;j<2;j++)q.push([ig,M(-.25+i*.5,-.375+y*.25,-.25+j*.5,0,(y&1)?1.5708:0,0)]);return[{g:mg(q),tx:'metal',c:d.color,r:.22,m:1}]},b:()=>FULL},
+block:{g:d=>[{g:W1(B(.985,.985,.985)),tx:/concrete/i.test(d.name)?'conc':'n',c:d.color,r:.85}],b:()=>FULL},
+boxes:{g:d=>{const rot=(((d.rot|0)%4)+4)%4,c=[1,0,-1,0][rot],s=[0,1,0,-1][rot],n=d.name||'',me=/iron|bars/i.test(n),st=/cobble|stone|brick|sandstone/i.test(n),gl=d.pat==='glass',tr=/torch/i.test(n);
+ const parts=d.boxes.map(b=>{const x0=b[0]-.5,x1=b[3]-.5,z0=b[2]-.5,z1=b[5]-.5,ax=x0*c+z0*s,az=-x0*s+z0*c,bx=x1*c+z1*s,bz=-x1*s+z1*c,mx=Math.min(ax,bx),Mx=Math.max(ax,bx),mz=Math.min(az,bz),Mz=Math.max(az,bz);return[B(Math.max(.01,Mx-mx),Math.max(.01,b[4]-b[1]),Math.max(.01,Mz-mz)),M((mx+Mx)/2,(b[1]+b[4])/2-.5,(mz+Mz)/2)]});
+ return[{g:mg(parts),tx:me?'metal':st?'stone':'wood',c:d.color,r:me?.35:.85,m:me?.9:0,o:gl?.3:1,em:tr?'#ff9a30':null}]},b:()=>null}
+};
+function kindOf(d){const n=d.name||'',p=d.pat;
+ if(d.boxes)return'boxes';if(p==='lamp'||/lantern|lamp/i.test(n))return'lamp';if(p==='glass')return'glass';if(p==='ice')return'ice';if(p==='wave'||/water/i.test(n))return'water';
+ if(p==='leaves')return'leaves';if(p==='grass')return'grass';if(p==='log'||/log/i.test(n))return'log';if(p==='planks'||p==='parquet'||/plank/i.test(n))return'wood';
+ if(p==='brick'||p==='stonebrick'||/brick/i.test(n))return'brick';if(p==='roof')return'roof';if(p==='checker')return'floor';if(/diamond/i.test(n))return'gem';
+ if(/iron|gold/i.test(n))return'ingot';if(p==='sandstone')return'strata';if(/smooth|polished|concrete|plaster/i.test(n))return'block';
+ if(/dirt|snow|clay|terracotta|^sand$/i.test(n))return'mound';if(p==='cobble'||p==='speckle'||/stone|gravel|obsidian|coal/i.test(n))return'rock';return'block'}
+const DS=new WeakMap(),BC=new WeakMap(),BOXY={block:1,brick:1,wood:1,strata:1};
+function spec(d){let s=DS.get(d);if(s)return s;const k=kindOf(d),slab=d.shape==='slab',ls=K[k].g(d);
+ if(slab)ls.forEach(l=>{l.g.scale(1,.5,1);l.g.translate(0,-.25,0)});
+ s=DS.set(d,{k,ls:ls.map(l=>({geo:l.g,mt:mat(l)}))}).get(d);return s}
+window.__realOn=()=>on;
+window.__realBoxes=d=>{if(!on)return null;let r=BC.get(d);if(r!==undefined)return r;const k=kindOf(d);r=K[k].b(d);
+ if(r&&d.shape==='slab')r=r.map(b=>[b[0],b[1]*.5,b[2],b[3],b[4]*.5,b[5]]);BC.set(d,r);return r};
+// ---------- scene sync ----------
+function build(v,g){const W=v._w,E=v._t.env,S=W.S||v.getBlockSize();
+ for(let i=rg.children.length-1;i>=0;i--){const c=rg.children[i];rg.remove(c);if(c.dispose)c.dispose()}
+ const bk=new Map(),lights=[],key=(x,y,z)=>((x+OX)*NZ+(z+OZ))*NY+(y+OY),kc=new Map();
+ const defOf=t=>W.defs.get(t)||W.defs.get(t%VF),kOf=t=>{let k=kc.get(t);if(k==null){const d=defOf(t);k=d?kindOf(d):'';kc.set(t,k)}return k};
+ const cov=(x,y,z)=>{for(const o of[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){const t=W.cells.get(key(x+o[0],y+o[1],z+o[2]));if(!t||!BOXY[kOf(t)])return false;const d=defOf(t);if(!d||d.shape==='slab')return false}return true};
+ W.cells.forEach((t,k0)=>{const d=defOf(t);if(!d)return;const kd=kOf(t);
+  let k=k0,y=k%NY;k=(k-y)/NY;const z=k%NZ,x=(k-z)/NZ-OX;const zz=z-OZ,yy=y-OY;
+  if(BOXY[kd]&&cov(x,yy,zz))return;
+  const sp=spec(d),h=((x*73856093)^(yy*19349663)^(zz*83492791))>>>0,fix=kd==='glass'||kd==='roof'||kd==='boxes',org=kd==='rock'||kd==='mound'||kd==='grass'||kd==='leaves',j=org?1+((h%9)-4)*.01:1;
+  const m=M((x+.5)*S,(yy+.5)*S,(zz+.5)*S,0,fix?0:(h>>3&3)*Math.PI/2,0,S*j,S*j,S*j);
+  sp.ls.forEach((l,i)=>{const id=d.id+'|'+i;let b=bk.get(id);if(!b){b={l,a:[]};bk.set(id,b)}b.a.push(m)});
+  if(kd==='lamp'&&lights.length<6)lights.push([(x+.5)*S,(yy+.6)*S,(zz+.5)*S,d.color])});
+ bk.forEach(b=>{const m=new T.InstancedMesh(b.l.geo,b.l.mt,b.a.length);m.frustumCulled=false;m.castShadow=!(b.l.mt.opacity<1);m.receiveShadow=true;b.a.forEach((q,i)=>m.setMatrixAt(i,q));m.instanceMatrix.needsUpdate=true;rg.add(m)});
+ lights.forEach(q=>{const L=new T.PointLight(new T.Color(q[3]),1.1,S*7);L.position.set(q[0],q[1],q[2]);rg.add(L)});
+ E.requestRender()}
+let b2=null;
+function ui(){const open=!!(window.ForgeTerrainGame&&window.ForgeTerrainGame.isOpen&&window.ForgeTerrainGame.isOpen()),s=(open?1:0)+':'+(on?1:0);if(s===lastBtn)return;lastBtn=s;
+ if(!btn){btn=document.createElement('div');btn.style.cssText='position:fixed;left:8px;top:40%;z-index:100000;width:46px;height:46px;border-radius:50%;align-items:center;justify-content:center;font-size:22px;background:rgba(20,24,40,.85);color:#fff;border:2px solid #4a5bff;touch-action:manipulation;user-select:none;-webkit-user-select:none';btn.onpointerdown=e=>{e.stopPropagation();e.preventDefault();set(!on)};document.body.appendChild(btn)}
+ if(!b2){b2=btn.cloneNode(false);b2.style.top='calc(40% + 54px)';b2.textContent='\u2728';b2.onpointerdown=e=>{e.stopPropagation();e.preventDefault();panel()};document.body.appendChild(b2)}b2.style.display=open?'flex':'none';btn.style.display=open?'flex':'none';btn.textContent=on?'\u{1F30D}':'\u{1F9F1}';btn.style.borderColor=on?'#3ddc84':'#4a5bff'}
+let fr=0;
+function loop(){requestAnimationFrame(loop);try{TU.value=performance.now()/1000;ui();const v=vb();if(!on||!v)return;if(HS&&(fr++%5===0))v._t.env.requestRender();const g=v._t.env.scene.getObjectByName('VoxelBuild');if(!g)return;
+ if(!rg){rg=new T.Group();rg.name='RealLife'}if(rg.parent!==g)g.add(rg);
+ let s=v._w.cells.size+'|'+v._w.S+'|';g.children.forEach(c=>{if(c!==rg){c.visible=false;if(c.isInstancedMesh)s+=c.count+':'+c.instanceMatrix.version+','}});
+ if(s!==sig&&performance.now()-lastB>120){sig=s;lastB=performance.now();build(v,g)}}catch(e){console.error('RealLife',e)}}
+function set(v){on=!!v;try{localStorage.setItem(KEY,on?'1':'0')}catch(e){}sig='';lastBtn='';const V=vb();
+ if(!on&&V){const g=V._t.env.scene.getObjectByName('VoxelBuild');if(g){g.children.forEach(c=>{if(c!==rg)c.visible=true});if(rg){for(let i=rg.children.length-1;i>=0;i--){const c=rg.children[i];rg.remove(c);if(c.dispose)c.dispose()}}}V._t.env.requestRender()}
+ if(V)V._t.env.toast(on?'\u{1F30D} Real-Life Mode ON \u2014 ab har block asli cheez ban kar lagega (collision bhi asli)':'\u{1F9F1} Real-Life Mode OFF \u2014 Minecraft blocks wapas',2600)}
+
+// ---------- TEXTURE ENHANCER: smooth hi-res + micro-detail + bump + less plastic shine, strength 0..300% ----------
+const EC=new WeakMap();
+function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv)return e.t;if(e)e.t.dispose();
+ const N=256,c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
+ try{g.drawImage(src.image,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
+ const d=im.data,r=rnd(7);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=(y*N+x)*4,m=Math.sin(x*.045+y*.03)*Math.sin(y*.05-x*.02)*.5+Math.sin(x*.19)*Math.sin(y*.17)*.3,f=1+((r()-.5)*.55+m*.6)*lv*.22;d[i]*=f;d[i+1]*=f;d[i+2]*=f}
+ g.putImageData(im,0,0);const t=new T.CanvasTexture(c);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.encoding=src.encoding;t.anisotropy=16;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;EC.set(src,{lv,t});return t}
+function eMat(m,lv){const k=lv.toFixed(2),u=m.userData;if(u.eh===k||u.bs0!=null)return;u.eh=k;if(!u.o)u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale,r:m.roughness};if(!u.o.map)return;
+ if(lv<=0){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;m.roughness=u.o.r}else{const t=enhTex(u.o.map,lv);if(t){m.map=t;m.bumpMap=t;m.bumpScale=.9*lv;m.roughness=Math.max(.04,Math.min(1,u.o.r*(1-.12*lv)))}}m.needsUpdate=true}
+function setEnh(v){enh=v;try{localStorage.setItem('forgeTexEnh',String(v))}catch(e){}Object.keys(MT).forEach(k=>ER(MT[k]));const V=vb();if(V){V._t.env.requestRender();V._t.env.toast('\u2728 Texture Enhance: '+Math.round(v*100)+'%',1400)}}
+setInterval(()=>{try{const v=vb();if(!v||on)return;const g=v._t.env.scene.getObjectByName('VoxelBuild');if(!g)return;let ch=0;g.children.forEach(c=>{if(c===rg)return;[].concat(c.material||[]).forEach(m=>{const k=enh.toFixed(2);if(m.userData.eh!==k&&m.userData.bs0==null){eMat(m,enh);ch=1}})});if(ch)v._t.env.requestRender()}catch(e){}},400);
+function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}p=document.createElement('div');p.id='rlEnh';
+ p.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:100001;padding:12px 14px;border-radius:14px;background:rgba(18,22,38,.96);color:#fff;font:13px system-ui;border:1px solid #4a5bff;touch-action:manipulation';
+ p.onpointerdown=e=>e.stopPropagation();const bs='flex:1;padding:9px 4px;border-radius:8px;background:#2a3150;text-align:center;';
+ p.innerHTML='<div style="font-weight:700;margin-bottom:6px">\u2728 Texture Enhancer: <span id="rlV">'+Math.round(enh*100)+'%</span></div><input id="rlS" type="range" min="0" max="300" step="5" value="'+Math.round(enh*100)+'" style="width:100%"><div style="display:flex;gap:6px;margin-top:8px"><div class="rb" data-v="0" style="'+bs+'">Off</div><div class="rb" data-v="100" style="'+bs+'">Normal</div><div class="rb" data-v="200" style="'+bs+'">Strong</div><div class="rb" data-v="300" style="'+bs+'">Max</div></div><div style="display:flex;gap:6px;margin-top:6px"><div id="rlR" style="'+bs+'">\u{1F30D} Real-Life: '+(on?'ON':'OFF')+'</div><div id="rlX" style="'+bs+'">\u2715 Close</div></div><div style="font-size:11px;opacity:.7;margin-top:6px">Slider chhodte hi lagta hai. 0% = original, 300% = sabse zyada detail aur depth.</div>';
+ document.body.appendChild(p);const S=p.querySelector('#rlS'),V=p.querySelector('#rlV');
+ S.oninput=()=>{V.textContent=S.value+'%'};S.onchange=()=>setEnh(S.value/100);
+ p.querySelectorAll('.rb').forEach(b=>b.onpointerdown=()=>{S.value=b.dataset.v;V.textContent=S.value+'%';setEnh(S.value/100)});
+ p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
+window.RealLife={on:()=>on,set,panel,enh:()=>enh,setEnh};loop();
 })();
 </script>
 </body>
