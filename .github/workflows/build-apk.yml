@@ -83,10 +83,37 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build debug APK
+      # FIX: Gradle wrapper download from services.gradle.org timed out (default networkTimeout=10000ms).
+      # Raise the timeout and use the smaller "-bin" distribution (no sources/docs) so it downloads fast.
+      - name: Harden Gradle wrapper download (longer timeout, smaller distribution)
+        run: |
+          f=android/gradle/wrapper/gradle-wrapper.properties
+          sed -i 's/-all\.zip/-bin.zip/' $f
+          if grep -q '^networkTimeout' $f; then
+            sed -i 's/^networkTimeout=.*/networkTimeout=120000/' $f
+          else
+            echo 'networkTimeout=120000' >> $f
+          fi
+          cat $f
+
+      - name: Cache Gradle (wrapper + dependencies)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build debug APK (retries on network failure)
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          for i in 1 2 3; do
+            ./gradlew assembleDebug --no-daemon && exit 0
+            echo "Gradle build failed (attempt $i/3), retrying in 15s..."
+            sleep 15
+          done
+          exit 1
 
       - name: Upload APK as downloadable artifact
         uses: actions/upload-artifact@v4
