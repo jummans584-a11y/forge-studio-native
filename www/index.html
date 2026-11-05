@@ -22411,11 +22411,12 @@ var FA_CORE = (function (THREE) {
     return out;
   }
 
-  function life(P, u, dur, loop, amt) {
+  function life(P, u, dur, loop, amt, ex) {
     if (!amt) return P;
-    const th = TAU * u, n = Math.max(1, Math.round(dur / 3.6)), a = amt * clamp(dur / 2, 0.3, 1) * (loop ? 1 : Math.sin(Math.PI * u)), o = Object.assign({}, P);
-    const b = Math.sin(th * n), b2 = Math.sin(th * n - 0.8);
-    o.sp += 0.9 * a * b; o.np -= 0.5 * a * b2; o.aLo += 0.7 * a * b; o.aRo += 0.7 * a * b;
+    const xv = ex || 0;   // exertion 0..1 (from realMotion): resting = slow shallow breath, running = fast deep breath
+    const th = TAU * u, n = Math.max(1, Math.round(dur / (3.6 / (1 + 2.2 * xv)))), a = amt * clamp(dur / 2, 0.3, 1) * (loop ? 1 : Math.sin(Math.PI * u)), o = Object.assign({}, P);
+    const b = Math.sin(th * n), b2 = Math.sin(th * n - 0.8), bd = 1 + 1.4 * xv;
+    o.sp += 0.9 * a * bd * b; o.np -= 0.5 * a * bd * b2; o.aLo += 0.7 * a * bd * b; o.aRo += 0.7 * a * bd * b;
     o.nw += 1.1 * a * Math.sin(th * (n + 1) + 1.3); o.nr += 0.6 * a * Math.sin(th * (n + 2) + 0.4); o.sr += 0.5 * a * Math.sin(th * (n + 1) + 2.1);
     o.aLe += 1.5 * a * Math.sin(th * (n + 1) + 0.2); o.aRe += 1.5 * a * Math.sin(th * (n + 1) + 1.7);
     // hands are never frozen: slow independent finger / thumb / wrist drift, different for each hand
@@ -22423,6 +22424,50 @@ var FA_CORE = (function (THREE) {
     o.cLt += 2.0 * a * Math.sin(th * (n + 2) + 1.9); o.cRt += 2.0 * a * Math.sin(th * (n + 2) + 0.9);
     o.cLs += 1.6 * a * Math.sin(th * (n + 2) + 1.1); o.cRs += 1.6 * a * Math.sin(th * (n + 1) + 0.3);
     o.wL += 2.6 * a * Math.sin(th * (n + 1) + 0.9); o.wR += 2.6 * a * Math.sin(th * (n + 1) + 2.6);
+    return o;
+  }
+
+  // ===================================================================================
+  // REAL-LIFE MOTION — one layer applied to EVERY library clip when it is baked (so all of them improve at once):
+  //  1) overlapping action: in a real body the distal parts trail the proximal ones — forearm lags the upper arm,
+  //     wrist lags the forearm, fingers lag the wrist (and, in one-shot actions, head / upper spine lag the hips).
+  //     This is what makes a swing feel like a whip instead of a rigid lever. Faded out at the end of one-shots so they still land exactly.
+  //     (Loops never lag the head: the gait already counter-rotates it on purpose to keep the gaze level.)
+  //  2) exertion: how hard the clip works (limb speed) -> breathing gets faster and deeper (see life()).
+  //  3) weight shift: standing-type loops slowly move weight from one leg to the other and the torso counter-balances.
+  // Custom / key-framed clips (no category) are never touched. Strength 0 = off.
+  // ===================================================================================
+  const RL_LAGS = [   // [pose keys, seconds the joint trails its parent, one-shot clips only, max shift in degrees (keeps fast strikes snappy)]
+    [['aLe', 'aRe'], 0.03, false, 30], [['wL', 'wR'], 0.05, false, 20],
+    [['cLc', 'cLt', 'cLs', 'cLi', 'cRc', 'cRt', 'cRs', 'cRi'], 0.07, false, 25],
+    [['np', 'nw', 'nr'], 0.06, true, 14], [['sp', 'sw', 'sr'], 0.02, true, 8]
+  ];
+  // how hard the clip works: ex 0..1 from the two fastest arm/leg swings (walk ~0.1, run ~0.8, sprint 1, standing gestures 0),
+  // leg = how much the legs move (weight shift only for planted feet), air = max airborne amount
+  function rlExertion(pose, dur) {
+    const N = 48, lk = ['aLf', 'aRf', 'lLf', 'lRf'], gk = ['lLf', 'lRf', 'lLk', 'lRk'], sp = [0, 0, 0, 0]; let prev = pose(0), leg = 0, air = prev.air || 0;
+    for (let i = 1; i <= N; i++) {
+      const cur = pose(i / N); lk.forEach((k, j) => { sp[j] += Math.abs(cur[k] - prev[k]); });
+      gk.forEach(k => { leg += Math.abs(cur[k] - prev[k]); }); air = Math.max(air, cur.air || 0); prev = cur;
+    }
+    const v = sp.map(x => x / dur).sort((a, b) => b - a), top2 = (v[0] + v[1]) / 2;
+    return { ex: clamp((top2 - 90) / 280, 0, 1), leg: leg / 4 / dur, air };
+  }
+  function realMotion(P, pose, u, dur, loop, amt, rx) {
+    const o = Object.assign({}, P), fade = loop ? 1 : clamp((1 - u) / 0.1, 0, 1);
+    RL_LAGS.forEach(g => {
+      if (g[2] && loop) return;
+      const d = Math.min(g[1] * amt, 0.12 * dur) / dur * fade; if (d <= 0) return;
+      let u2 = u - d; u2 = loop ? ((u2 % 1) + 1) % 1 : Math.max(0, u2);
+      const Q = pose(u2), cap = g[3] * Math.min(1, amt); g[0].forEach(k => { o[k] = P[k] + clamp(Q[k] - P[k], -cap, cap); });
+    });
+    if (loop && rx) {
+      const still = (1 - clamp(rx.ex / 0.25, 0, 1)) * (1 - clamp(rx.leg / 60, 0, 1)) * (rx.air > 0.05 ? 0 : 1);
+      if (still > 0.01) {
+        const th = TAU * u, n = Math.max(1, Math.round(dur / 6)), w = Math.sin(th * n + 0.7), w2 = Math.sin(th * (n + 1) + 2.2), k = amt * still;
+        o.tx += 0.006 * k * w; o.hr += 0.8 * k * w; o.sr -= 0.6 * k * w; o.nr += 0.4 * k * w2; o.hw += 0.5 * k * w2; o.sw -= 0.4 * k * w2;
+      }
+    }
     return o;
   }
 
@@ -22693,11 +22738,14 @@ var FA_CORE = (function (THREE) {
     function bake(name, duration, fps, poseFn, opts) {
       opts = opts || {};
       const n = Math.max(2, Math.round(duration * fps)), times = [], qv = new Map(), hv = [], prev = new Map();
+      const lib = !!(opts.cat && !opts.rest);   // library clips only (custom clips are never touched)
+      const poseAt = uu => { const raw = poseFn(uu, uu * duration); let Q = fullPose(raw, opts.intensity); if (lib && HAND_KEYS.every(k => raw[k] == null || Math.abs(raw[k] - BASE[k]) < 1e-6)) Q = handAuto(Q, opts); return Q; };
+      const realAmt = lib && opts.cat !== 'Misc' ? (opts.real == null ? 1 : opts.real) : 0, rx = realAmt > 0 ? rlExertion(poseAt, duration) : null, exv = rx ? rx.ex : 0;
       for (let i = 0; i <= n; i++) {
-        const u = i / n, raw = poseFn(u, u * duration);
-        let P0 = fullPose(raw, opts.intensity);
-        if (opts.cat && !opts.rest && HAND_KEYS.every(k => raw[k] == null || Math.abs(raw[k] - BASE[k]) < 1e-6)) P0 = handAuto(P0, opts);   // library clips only
-        const P = life(P0, u, duration, opts.loop, opts.life == null ? 1 : opts.life);
+        const u = i / n;
+        let P0 = poseAt(u);
+        if (realAmt > 0) P0 = realMotion(P0, poseAt, u, duration, !!opts.loop, realAmt, rx);
+        const P = life(P0, u, duration, opts.loop, opts.life == null ? 1 : opts.life, realAmt > 0 ? exv : 0);
         const res = evaluate(P, opts); times.push(u * duration);
         res.q.forEach((q, b) => {
           let arr = qv.get(b); if (!arr) { arr = []; qv.set(b, arr); }
@@ -25225,7 +25273,7 @@ var FA_CORE = (function (THREE) {
   })();
 
   return {
-    gatherMeshData, detectYaw, analyze, preflight, buildRig, recalcWeights, restoreWeights, runDeformation, weightStats, skinTestData, BONE_PARENT, mapHumanoid, mapHumanoidSmart, detectHumanoid, rigTokens, makeDynamics, defaultDynCfg, createRig, keyframePoseFn, fullPose, mirrorPose,
+    gatherMeshData, detectYaw, analyze, preflight, buildRig, recalcWeights, restoreWeights, runDeformation, weightStats, skinTestData, BONE_PARENT, mapHumanoid, mapHumanoidSmart, detectHumanoid, rigTokens, makeDynamics, defaultDynCfg, createRig, keyframePoseFn, fullPose, mirrorPose, realMotion, rlExertion, life,
     BASE, POSE_KEYS, CLIPS, GROUPS: GAME_GROUPS_OUT, TOKENS, REQUIRED, BONE_ORDER, FINGER_NAMES, KF, HAND_PRESETS: HAND
   };
 })(THREE);
@@ -25633,7 +25681,7 @@ var FA_PRO = (function () {
       vis: { mode: 'heat', sel: null, selTok: null, overlays: [], hidden: [] },
       rigCache: null, intensity: 1, speed: 1, mirror: false, ground: true, cat: 'All', q: '',
       cp: Object.assign({}, C.BASE), keys: [], kDur: 2, kLoop: true, kName: 'My Animation', kTime: 0, kSel: -1, kEase: 'smooth', openGroups: { Body: true },
-      att: [], attSel: -1, attId: 1, fingers: true, fingerFlip: false, life: 1
+      att: [], attSel: -1, attId: 1, fingers: true, fingerFlip: false, life: 1, real: 1
     };
     const tokenOf = n => canonicalBoneToken(normalizeBoneName(n));
     const css = (e, s) => { e.style.cssText = s; return e; };
@@ -25677,7 +25725,7 @@ var FA_PRO = (function () {
       const mir = st.mirror;
       const fn = mir ? ((u, t) => C.mirrorPose(Object.assign({}, def.fn(u, t)))) : def.fn;
       const name = def.name + (mir ? ' (Mirror)' : '');
-      const clip = rig.bake(name, def.dur / st.speed, def.fps || 30, (u, t) => fn(u, t * st.speed), { loop: def.loop, footIK: st.footIK, ikSnap: st.ikSnap, intensity: st.intensity, ground: st.ground && def.ground !== false, balance: def.balance, rest: !!def.rest, life: (def.life == null ? 1 : def.life) * st.life, fingerFlip: st.fingerFlip, cat: def.cat, id: def.id });
+      const clip = rig.bake(name, def.dur / st.speed, def.fps || 30, (u, t) => fn(u, t * st.speed), { loop: def.loop, footIK: st.footIK, ikSnap: st.ikSnap, intensity: st.intensity, ground: st.ground && def.ground !== false, balance: def.balance, rest: !!def.rest, life: (def.life == null ? 1 : def.life) * st.life, fingerFlip: st.fingerFlip, cat: def.cat, id: def.id, real: st.real });
       try { if (def.imp && def.imp.length && (def.impX || /combat|weapon|sword|melee|unarmed|martial|fight|attack|magic|cast|spell|ranged|bow|gun|heavy|polearm|dagger|reaction/i.test((def.cat || '') + ' ' + (def.group || '')))) clip.userData = Object.assign(clip.userData || {}, { imp: def.imp.map(m => [m[0] / st.speed, m[1]]) }); } catch (e) {}   // v33: impact frames for hit-stop
       return { clip, name };
     }
@@ -26916,6 +26964,7 @@ var FA_PRO = (function () {
       slider('Intensity', 0.4, 1.6, 0.05, st.intensity, v => { st.intensity = v; }, v => v.toFixed(2) + '×');
       slider('Speed', 0.5, 2, 0.05, st.speed, v => { st.speed = v; }, v => v.toFixed(2) + '×');
       slider('Realism (breathing, finger & wrist drift)', 0, 2.5, 0.05, st.life, v => { st.life = v; }, v => v.toFixed(2) + '×');
+      slider('Real-Life motion (arm/hand follow-through, breathing, weight shift)', 0, 1.5, 0.05, st.real, v => { st.real = v; }, v => v <= 0 ? 'off' : v.toFixed(2) + '×');
       const o = mk('div'); css(o, 'display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;');
       const tgl = (t, on, fn) => { const b = btn(t + (on ? ' ✓' : ''), () => { fn(); buildCharacterDock(); }, on, true); o.appendChild(b); };
       tgl('Mirror L↔R', st.mirror, () => st.mirror = !st.mirror);
@@ -38512,8 +38561,7 @@ function tex(k){if(TX[k])return TX[k];const c=document.createElement('canvas');c
  if(k==='conc'){g.fillStyle='rgba(30,30,30,.55)';[[40,40],[216,40],[40,216],[216,216]].forEach(p=>{g.beginPath();g.arc(p[0],p[1],7,0,6.3);g.fill()})}
  const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;t.encoding=T.sRGBEncoding;t.anisotropy=4;return TX[k]=t}
 const TU={value:0};let HS=0,enh=1;try{const q=parseFloat(localStorage.getItem('forgeTexEnh'));if(q>=0&&q<=3)enh=q}catch(e){}
-function ER(m){const u=m.userData;m.bumpScale=u.bs0*enh;m.roughness=Math.max(.03,Math.min(1,u.r0*(1-.1*(enh-1))))}
-function fin(l,m){m.userData.bs0=m.bumpScale;m.userData.r0=m.roughness;ER(m);
+function fin(l,m){
  if(l.sw){HS=1;m.customProgramCacheKey=()=>'rlsw';m.onBeforeCompile=sh=>{sh.uniforms.uT=TU;sh.vertexShader='uniform float uT;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n#ifdef USE_INSTANCING\ntransformed.x+=sin(uT*1.7+instanceMatrix[3].x*1.3+position.y*5.0)*0.035*max(position.y+0.5,0.0);\ntransformed.z+=cos(uT*1.3+instanceMatrix[3].z*1.1+position.x*5.0)*0.025*max(position.y+0.5,0.0);\n#endif')}}return m}
 function mat(l){const k=[l.tx,l.c,l.r,l.m,l.o,l.em,l.ds,l.sw].join();
  return MT[k]||(MT[k]=fin(l,new T.MeshStandardMaterial({map:tex(l.tx||'n'),bumpMap:tex(l.tx||'n'),bumpScale:l.tx==='n'?.4:1.4,color:l.c||'#ffffff',roughness:l.r==null?.9:l.r,metalness:l.m||0,vertexColors:true,transparent:l.o<1,opacity:l.o==null?1:l.o,depthWrite:!(l.o<1),side:l.ds?T.DoubleSide:T.FrontSide,emissive:l.em||'#000000',emissiveIntensity:l.em?1.1:0})))}
@@ -38598,23 +38646,52 @@ function set(v){on=!!v;try{localStorage.setItem(KEY,on?'1':'0')}catch(e){}sig=''
  if(!on&&V){const g=V._t.env.scene.getObjectByName('VoxelBuild');if(g){g.children.forEach(c=>{if(c!==rg)c.visible=true});if(rg){for(let i=rg.children.length-1;i>=0;i--){const c=rg.children[i];rg.remove(c);if(c.dispose)c.dispose()}}}V._t.env.requestRender()}
  if(V)V._t.env.toast(on?'\u{1F30D} Real-Life Mode ON \u2014 ab har block asli cheez ban kar lagega (collision bhi asli)':'\u{1F9F1} Real-Life Mode OFF \u2014 Minecraft blocks wapas',2600)}
 
-// ---------- TEXTURE ENHANCER: smooth hi-res + micro-detail + bump + less plastic shine, strength 0..300% ----------
+// ---------- TEXTURE ENHANCER v2: real image-enhance — sharpen (unsharp) + clarity (local contrast) + vibrance + fine grain, bump rebuilt from luminance; strength 0..300% ----------
 const EC=new WeakMap();
-function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv)return e.t;if(e)e.t.dispose();
- const N=256,c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
- try{g.drawImage(src.image,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
- const d=im.data,r=rnd(7);for(let y=0;y<N;y++)for(let x=0;x<N;x++){const i=(y*N+x)*4,m=Math.sin(x*.045+y*.03)*Math.sin(y*.05-x*.02)*.5+Math.sin(x*.19)*Math.sin(y*.17)*.3,f=1+((r()-.5)*.55+m*.6)*lv*.22;d[i]*=f;d[i+1]*=f;d[i+2]*=f}
- g.putImageData(im,0,0);const t=new T.CanvasTexture(c);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.encoding=src.encoding;t.anisotropy=16;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;EC.set(src,{lv,t});return t}
-function eMat(m,lv){const k=lv.toFixed(2),u=m.userData;if(u.eh===k||u.bs0!=null)return;u.eh=k;if(!u.o)u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale,r:m.roughness};if(!u.o.map)return;
- if(lv<=0){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;m.roughness=u.o.r}else{const t=enhTex(u.o.map,lv);if(t){m.map=t;m.bumpMap=t;m.bumpScale=.9*lv;m.roughness=Math.max(.04,Math.min(1,u.o.r*(1-.12*lv)))}}m.needsUpdate=true}
-function setEnh(v){enh=v;try{localStorage.setItem('forgeTexEnh',String(v))}catch(e){}Object.keys(MT).forEach(k=>ER(MT[k]));const V=vb();if(V){V._t.env.requestRender();V._t.env.toast('\u2728 Texture Enhance: '+Math.round(v*100)+'%',1400)}}
-setInterval(()=>{try{const v=vb();if(!v||on)return;const g=v._t.env.scene.getObjectByName('VoxelBuild');if(!g)return;let ch=0;g.children.forEach(c=>{if(c===rg)return;[].concat(c.material||[]).forEach(m=>{const k=enh.toFixed(2);if(m.userData.eh!==k&&m.userData.bs0==null){eMat(m,enh);ch=1}})});if(ch)v._t.env.requestRender()}catch(e){}},400);
+// tileable (wrap-around) box blur x3 ~ gaussian, on a Float32Array channel — wrap so tiled blocks show no seams
+function blurW(a,w,h,r){const o=new Float32Array(a),t=new Float32Array(a.length),k=1/(2*r+1);
+ for(let p=0;p<3;p++){
+  for(let y=0;y<h;y++){const b=y*w;let s=0;for(let i=-r;i<=r;i++)s+=o[b+((i%w)+w)%w];for(let x=0;x<w;x++){t[b+x]=s*k;s+=o[b+(x+r+1)%w]-o[b+((x-r)%w+w)%w]}}
+  for(let x=0;x<w;x++){let s=0;for(let i=-r;i<=r;i++)s+=t[(((i%h)+h)%h)*w+x];for(let y=0;y<h;y++){o[y*w+x]=s*k;s+=t[((y+r+1)%h)*w+x]-t[(((y-r)%h+h)%h)*w+x]}}}
+ return o}
+// in-place on RGBA bytes; returns blurred luminance of the result (used as the bump height)
+function enhPix(d,N,lv){const n=N*N,L=new Float32Array(n);
+ for(let i=0;i<n;i++)L[i]=.299*d[i*4]+.587*d[i*4+1]+.114*d[i*4+2];
+ const s=blurW(L,N,N,Math.max(1,Math.round(N/110))),l=blurW(L,N,N,Math.max(4,Math.round(N/14)));
+ const A=Math.min(2.2,.75*lv),K=Math.min(1.1,.38*lv),V=1+.10*lv,G=4.5*lv,r=rnd(7),H=new Float32Array(n);
+ for(let i=0;i<n;i++){const j=i*4;if(d[j+3]===0){H[i]=L[i];continue}
+  const dl=A*(L[i]-s[i])+K*(L[i]-l[i]),g=(r()-.5)*2*G*(.45+L[i]/255*.8),nl=L[i]+dl+g;
+  d[j]=nl+(d[j]+dl+g-nl)*V;d[j+1]=nl+(d[j+1]+dl+g-nl)*V;d[j+2]=nl+(d[j+2]+dl+g-nl)*V;H[i]=nl}
+ return blurW(H,N,N,1)}
+function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv)return e;if(e){e.t.dispose();e.b.dispose()}
+ const im0=src.image;if(!im0)return null;const sw=im0.width||im0.naturalWidth||256,sh=im0.height||im0.naturalHeight||256;
+ let N=1;while(N<Math.max(sw,sh))N<<=1;N=Math.max(256,Math.min(1024,N)); // never smaller than the source (old version shrank everything to 256)
+ const c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
+ try{g.drawImage(im0,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
+ const H=enhPix(im.data,N,lv);g.putImageData(im,0,0);
+ const M2=N>>1,bc=document.createElement('canvas');bc.width=bc.height=M2;const bg=bc.getContext('2d'),bi=bg.createImageData(M2,M2);
+ for(let y=0;y<M2;y++)for(let x=0;x<M2;x++){const v=H[(y*2)*N+x*2],q=(y*M2+x)*4;bi.data[q]=bi.data[q+1]=bi.data[q+2]=v;bi.data[q+3]=255}bg.putImageData(bi,0,0);
+ const mk=(cv,enc)=>{const t=new T.CanvasTexture(cv);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=enc;t.anisotropy=8;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;return t};
+ const r={lv,t:mk(c,src.encoding),b:mk(bc,T.LinearEncoding)};EC.set(src,r);return r}
+function eMat(m,lv){const u=m.userData;if(!u.o){if(!m.map)return false;u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale}}
+ const k=lv.toFixed(2);if(u.eh===k)return false;u.eh=k;
+ if(lv<=0){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs}
+ else{const e=enhTex(u.o.map,lv);if(!e)return false;m.map=e.t;
+  if(u.o.bump){m.bumpMap=e.b;m.bumpScale=u.o.bs*lv}else if(!m.normalMap){m.bumpMap=e.b;m.bumpScale=.8*lv}}
+ m.needsUpdate=true;return true}
+// one worker for both modes: Real-Life ON -> its procedural materials, OFF -> the normal Minecraft blocks. Time-boxed so the slider never freezes the phone.
+function enhTick(){try{const v=vb();if(!v)return;const t0=performance.now(),list=[];
+ if(on)Object.keys(MT).forEach(k=>list.push(MT[k]));else{const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))})}
+ const k=enh.toFixed(2);let ch=0;for(const m of list){if(m.userData.eh===k)continue;if(eMat(m,enh))ch=1;if(performance.now()-t0>12)break}
+ if(ch)v._t.env.requestRender()}catch(e){}}
+function setEnh(v){enh=v;try{localStorage.setItem('forgeTexEnh',String(v))}catch(e){}const V=vb();if(V){enhTick();V._t.env.requestRender();V._t.env.toast('✨ Texture Enhance: '+Math.round(v*100)+'%',1400)}}
+setInterval(enhTick,250);
 function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}p=document.createElement('div');p.id='rlEnh';
  p.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:100001;padding:12px 14px;border-radius:14px;background:rgba(18,22,38,.96);color:#fff;font:13px system-ui;border:1px solid #4a5bff;touch-action:manipulation';
  p.onpointerdown=e=>e.stopPropagation();const bs='flex:1;padding:9px 4px;border-radius:8px;background:#2a3150;text-align:center;';
- p.innerHTML='<div style="font-weight:700;margin-bottom:6px">\u2728 Texture Enhancer: <span id="rlV">'+Math.round(enh*100)+'%</span></div><input id="rlS" type="range" min="0" max="300" step="5" value="'+Math.round(enh*100)+'" style="width:100%"><div style="display:flex;gap:6px;margin-top:8px"><div class="rb" data-v="0" style="'+bs+'">Off</div><div class="rb" data-v="100" style="'+bs+'">Normal</div><div class="rb" data-v="200" style="'+bs+'">Strong</div><div class="rb" data-v="300" style="'+bs+'">Max</div></div><div style="display:flex;gap:6px;margin-top:6px"><div id="rlR" style="'+bs+'">\u{1F30D} Real-Life: '+(on?'ON':'OFF')+'</div><div id="rlX" style="'+bs+'">\u2715 Close</div></div><div style="font-size:11px;opacity:.7;margin-top:6px">Slider chhodte hi lagta hai. 0% = original, 300% = sabse zyada detail aur depth.</div>';
+ p.innerHTML='<div style="font-weight:700;margin-bottom:6px">\u2728 Texture Enhancer: <span id="rlV">'+Math.round(enh*100)+'%</span></div><input id="rlS" type="range" min="0" max="300" step="5" value="'+Math.round(enh*100)+'" style="width:100%"><div style="display:flex;gap:6px;margin-top:8px"><div class="rb" data-v="0" style="'+bs+'">Off</div><div class="rb" data-v="100" style="'+bs+'">Normal</div><div class="rb" data-v="200" style="'+bs+'">Strong</div><div class="rb" data-v="300" style="'+bs+'">Max</div></div><div style="display:flex;gap:6px;margin-top:6px"><div id="rlR" style="'+bs+'">\u{1F30D} Real-Life: '+(on?'ON':'OFF')+'</div><div id="rlX" style="'+bs+'">\u2715 Close</div></div><div style="font-size:11px;opacity:.7;margin-top:6px">Slider chalate hi preview dikhta hai. 0% = original, 100% = sharp + rang + detail, 300% = sabse zyada.</div>';
  document.body.appendChild(p);const S=p.querySelector('#rlS'),V=p.querySelector('#rlV');
- S.oninput=()=>{V.textContent=S.value+'%'};S.onchange=()=>setEnh(S.value/100);
+ let tm=0;S.oninput=()=>{V.textContent=S.value+'%';clearTimeout(tm);tm=setTimeout(()=>setEnh(S.value/100),150)};S.onchange=()=>{clearTimeout(tm);setEnh(S.value/100)};
  p.querySelectorAll('.rb').forEach(b=>b.onpointerdown=()=>{S.value=b.dataset.v;V.textContent=S.value+'%';setEnh(S.value/100)});
  p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
 window.RealLife={on:()=>on,set,panel,enh:()=>enh,setEnh};loop();
