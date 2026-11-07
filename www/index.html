@@ -34208,15 +34208,16 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         } else note('Poori imaarat / deewar ek saath ghisni ho to pehle ▭ Select se area chuno, phir yahan wapas aao.');
       }
       else if (W.tool === 'carp') {
-        section('🪵 Carpentry — kaato, tarasho, gol karo');
+        section('🔦 Laser — kaato');
         note('Har block 8×8×8 chhote tukdon ka hota hai, isliye aap ek block ko aadha, chauthai ya kisi bhi shape mein kaat sakte ho. Kata hua block ab bhi normal block hai: undo, save, copy/paste, export sab chalte hain. Seedhi / darwaza / fence jaise shaped blocks nahi katte.');
-        const tr2 = rowEl(true); [['saw', '🪚 Aari (Hand Saw)'], ['circ', '⭕ Circular Saw'], ['jig', '〰 Jigsaw'], ['chisel', '🔨 Chisel']].forEach(([k, l]) => tr2.appendChild(btn(l, () => { W.carp = k; applyCam(); buildTerrainDock(); }, W.carp === k)));
+        W.carp = 'laser'; section('🔦 Laser Cutter');
+        { const r1 = rowEl(true); [[0, '1/8 khurch'], [1, '2/8'], [2, '4/8 aadha'], [3, '1 block'], [4, 'Aar-paar']].forEach(([k, l]) => r1.appendChild(btn(l, () => { W.lzD = k; buildTerrainDock(); }, (W.lzD == null ? 2 : W.lzD) === k))); section('Laser ki motai'); const r2 = rowEl(true); [[0, 'Patli'], [1, 'Normal'], [2, 'Moti']].forEach(([k, l]) => r2.appendChild(btn(l, () => { W.lzW = k; buildTerrainDock(); }, (W.lzW == null ? 1 : W.lzW) === k))); note('Block par tap karo — jahan tap karoge wahan laser ek cut lagata hai. Poori tarah continuous laser (dabake rakhna) 🎮 Game mein milta hai.'); }
         const axisRow = () => { section('Kis disha mein kaatna'); const r = rowEl(true); [['auto', '🧭 Auto'], ['x', '⬌ Dayen-bayen'], ['y', '⬍ Upar-neeche'], ['z', '⤢ Aage-peeche']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.sawAxis = k; buildTerrainDock(); }, W.sawAxis === k))); section('Kaun sa hissa hatana'); const r2 = rowEl(true); [['small', 'Chhota tukda'], ['plus', '+ taraf (upar/aage/dayen)'], ['minus', '− taraf']].forEach(([k, l]) => r2.appendChild(btn(l, () => { W.sawRm = k; buildTerrainDock(); }, W.sawRm === k))); };
         const widthSl = lbl => { const sl = mkSlider(0, 16, 1, W.cutW | 0, v => { W.cutW = Math.round(v); }, v => Math.round(v) === 0 ? 'sirf 1' : '±' + Math.round(v) + ' blk'); dock.appendChild(mkFieldGrid([mkField('↔', lbl, sl)], 1)); };
         if (W.carp === 'saw') { axisRow(); note('Block ke us point par tap karo jahan kaatna hai: cut nazdeeki 1/8 line par lagta hai. Auto = ungli jis taraf kinare ke paas hai us disha mein kaatta hai.'); }
         else if (W.carp === 'circ') { axisRow(); widthSl('Kitne blocks ek saath (dono taraf)'); const dp = mkSlider(1, 8, 1, W.cutD | 0, v => { W.cutD = Math.round(v); }, v => Math.round(v) + ' blk gehra'); dock.appendChild(mkFieldGrid([mkField('⬇', 'Kitna gehra kaate', dp)], 1)); note('Power tool: ek hi tap mein poori line / deewar ek barabar kat jaati hai.'); }
         else if (W.carp === 'jig') { section('Kaat ka type'); const r = rowEl(true); [['slope', '◢ Tirchha (slope / chhat)'], ['round', '◠ Gol (quarter round)']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.jigMode = k; buildTerrainDock(); }, W.jigMode === k))); widthSl('Kitne blocks ki line (dono taraf)'); note('Face par jahan tap karoge wahan se sabse nazdeeki kinare tak tirchha / gol kat banta hai. Kinare ke paas tap = chhota kat, door tap = bada kat.'); }
-        else { section('Chisel ka shape'); const r = rowEl(true); [['square', '▪ Chorus gadda'], ['round', '● Gol'], ['v', '▼ V-khancha']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.chiMode = k; buildTerrainDock(); }, W.chiMode === k)));
+        else if (W.carp === 'chisel') { section('Chisel ka shape'); const r = rowEl(true); [['square', '▪ Chorus gadda'], ['round', '● Gol'], ['v', '▼ V-khancha']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.chiMode = k; buildTerrainDock(); }, W.chiMode === k)));
           const s1 = mkSlider(1, 4, 1, W.chiSize | 0, v => { W.chiSize = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)'), s2 = mkSlider(1, 4, 1, W.chiDepth | 0, v => { W.chiDepth = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)');
           dock.appendChild(mkFieldGrid([mkField('📐', 'Size', s1), mkField('⬇', 'Gehrai', s2)], 2)); note('Ungli block par rakh kar chalao: chisel apni jagah ek baar kaat ta hai, ungli aage badhaoge to khancha banta jayega. Wahi jagah dobara tap karoge to aur gehra jayega. Camera ghumane ke liye Orbit button.'); }
       }
@@ -38481,7 +38482,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const gh = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(S * 1.005, S * 1.005, S * 1.005)), new THREE.LineBasicMaterial({ color: 0x66ff99, depthTest: false })); gh.visible = false; gh.renderOrder = 999; sc.add(gh);
       // ---- aiming ----
       const fwd = new V3(), eye = new V3();
-      if (W.lzD == null) W.lzD = 2; if (W.lzW == null) W.lzW = 1; if (W.pieceMine == null) W.pieceMine = true;
+      if (W.lzD == null) W.lzD = 2; if (W.lzW == null) W.lzW = 1; if (W.lzS == null) W.lzS = 3; if (W.pieceMine == null) W.pieceMine = true; W.carp = 'laser';
       let lz = null, lzT = 0;   // laser beam visual
       function beam(tp) {
         if (!lz) { lz = new THREE.Mesh(new THREE.CylinderGeometry(.012, .012, 1, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: .92, depthTest: false })); lz.renderOrder = 997; sc.add(lz); }
@@ -38522,7 +38523,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       function redo() { const m = st.fut.pop(); if (!m) { E.toast('Redo ke liye kuch nahi', 1000); return; } if (m.r) m.r(); else if (m.redo) m.redo(); else T.applyCh(m, false); st.hist.push(m); }
       // ---- UI ----
       const bs = 'position:absolute;border-radius:50%;border:2px solid rgba(255,255,255,.55);background:rgba(20,24,40,.55);color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;touch-action:none;';
-      const rawBtn = (txt, css, fn, hold) => { const b = el('div', bs + css, txt); let iv = 0, tm = 0, lt = 0; const stop = () => { clearInterval(iv); clearTimeout(tm); iv = tm = 0; b.style.background = 'rgba(20,24,40,.55)'; }; b.onpointerdown = e => { e.stopPropagation(); e.preventDefault(); const t = performance.now(); if (t - lt < 150) return; lt = t; stop(); b.style.background = 'rgba(102,126,255,.8)'; try { b.setPointerCapture(e.pointerId); } catch (x) { } fn(); if (hold) tm = setTimeout(() => { iv = setInterval(fn, (() => { const h2 = typeof hold === 'function' ? hold() : hold; return h2 > 1000 ? h2 : Math.min(h2, 110); })()); }, 200); }; /* one tap = ONE action; repeat only starts after a real long-press */ b.onpointerup = b.onpointercancel = b.onlostpointercapture = stop; ov.appendChild(b); return b; };
+      const rawBtn = (txt, css, fn, hold) => { const b = el('div', bs + css, txt); let iv = 0, tm = 0, lt = 0; const stop = () => { clearInterval(iv); clearTimeout(tm); iv = tm = 0; b.style.background = 'rgba(20,24,40,.55)'; }; b.onpointerdown = e => { e.stopPropagation(); e.preventDefault(); const t = performance.now(); if (t - lt < 55) return; lt = t; stop(); b.style.background = 'rgba(102,126,255,.8)'; try { b.setPointerCapture(e.pointerId); } catch (x) { } fn(); if (hold) tm = setTimeout(() => { iv = setInterval(fn, typeof hold === 'function' ? hold() : hold); }, 200); }; /* one tap = ONE action; repeat only starts after a real long-press */ b.onpointerup = b.onpointercancel = b.onlostpointercapture = stop; ov.appendChild(b); return b; };
       // ===== v19 🎛 HUD EDITOR: move / resize / copy / hide every on-screen button (like Minecraft's mobile touch-control editor) =====
       // Every button = its normal spot + an offset (CSS translate / scale), stored as screen fractions, so layouts survive rotation. Copies re-use the same action.
       let hudEdit = false, hudSel = null, hudBar = null, hudInfo = null, hudT = 0, hudRestored = false, hudCid = 0; const hudOcc = new Map(), hudAll = [], HUD_KEY = 'forgeHud_v1';
@@ -38650,7 +38651,13 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         const a = aim(), lzr = W.carp === 'laser'; if (lzr) beam(a && a.kind === 'v' ? a.point : null);
         if (!a) return; if (a.kind !== 'v') { if (!lzr) E.toast('Crosshair kisi bane hue block par rakho', 1300); return; }
         const l = T.carpAct(a.cell, a.point, [a.place[0] - a.cell[0], a.place[1] - a.cell[1], a.place[2] - a.cell[2]], fwd);
-        if (!l.length) { const m = T.carpMsg(); if (m && !lzr) E.toast(m, 1500); return; } edit(l);
+        if (!l.length) { const m = T.carpMsg(); if (m && !lzr) E.toast(m, 1500); return; } if (lzr) laserEdit(l); else edit(l);
+      }
+      function laserEdit(list) {
+        const m = new Map(); list.forEach(([x, y, z, t]) => { const k = E.key(x, y, z), old = W.cells.get(k) || 0; if (old === t) return; if (m.has(k)) m.get(k)[1] = t; else m.set(k, [old, t]); }); if (!m.size) return false; T.applyCh(m, false);
+        const now = performance.now(), last = st.hist[st.hist.length - 1];
+        if (last && last._lz && now - last._t < 1500) { m.forEach((v, k) => { const o = last.get(k); if (o) o[1] = v[1]; else last.set(k, v); }); last._t = now; }
+        else { m._lz = 1; m._t = now; st.hist.push(m); if (st.hist.length > 300) st.hist.shift(); } st.fut.length = 0; return true;
       }
       function openCarp() {
         if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('🪵 Carpentry'); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } };
@@ -38658,19 +38665,17 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         const chip = (r, t, on, f) => { const b = el('div', 'padding:8px 12px;border-radius:8px;text-align:center;flex:1;min-width:64px;background:' + (on ? '#4a5bff' : '#2a3150'), t); b.onpointerdown = e => { e.stopPropagation(); f(); m.remove(); st.menu = st.inv = false; openCarp(); }; r.appendChild(b); };
         const h = t => c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', t));
         const step = (lbl, key, lo, hi, fmt) => { const r = row(); chip(r, '−', false, () => { W[key] = Math.max(lo, (W[key] | 0) - 1); }); chip(r, lbl + ': ' + fmt(W[key] | 0), true, () => { }); chip(r, '+', false, () => { W[key] = Math.min(hi, (W[key] | 0) + 1); }); };
-        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block par rakho aur 🛠 dabao. Har block 8×8×8 tukdon ka hai — aadha, chauthai, tirchha, gol, khancha sab kat sakta hai. Kata hua block save, undo, copy/paste, export sab mein chalta hai.'));
-        h('Tool'); { const r = row(); [['saw', '🪚 Aari'], ['circ', '⭕ Circular'], ['jig', '〰 Jigsaw'], ['chisel', '🔨 Chisel'], ['laser', '🔦 Laser']].forEach(([k, l]) => chip(r, l, W.carp === k, () => { W.carp = k; })); }
-        if (W.carp === 'laser') { h('🔦 Laser — 🛠 dabake rakho aur crosshair ghumao: jahan point karoge wahan ka block katta jayega'); step('Gehrai', 'lzD', 0, 4, v => ['1/8 khurch', '2/8', '4/8 aadha', '1 block', 'Aar-paar'][v] || v); step('Motai', 'lzW', 0, 2, v => ['Patli', 'Normal', 'Moti'][v] || v); h('Kata hua tukda'); { const r = row(); chip(r, W.pieceMine !== false ? '⛏ Tukda hatao: ON' : '⛏ Tukda hatao: OFF', true, () => { W.pieceMine = W.pieceMine === false; }); } c.appendChild(el('div', 'font-size:11px;opacity:.75', 'ON: kate hue block par ⛏ dabaoge to sirf wahi alag hua tukda hat'+'ega jis par nishana hai (poora block nahi). OFF: ⛏ poora block hatata hai.')); }
-        if (W.carp === 'saw' || W.carp === 'circ') {
-          h('Disha'); { const r = row(); [['auto', '🧭 Auto'], ['x', '⬌ X'], ['y', '⬍ Y'], ['z', '⤢ Z']].forEach(([k, l]) => chip(r, l, W.sawAxis === k, () => { W.sawAxis = k; })); }
-          h('Kaun sa hissa hatana'); { const r = row(); [['small', 'Chhota'], ['plus', '+ taraf'], ['minus', '− taraf']].forEach(([k, l]) => chip(r, l, W.sawRm === k, () => { W.sawRm = k; })); }
-        }
-        if (W.carp === 'circ') { step('Chaudai ±', 'cutW', 0, 16, v => v + ' blk'); step('Gehrai', 'cutD', 1, 8, v => v + ' blk'); }
-        if (W.carp === 'jig') { h('Kaat'); { const r = row(); [['slope', '◢ Tirchha'], ['round', '◠ Gol']].forEach(([k, l]) => chip(r, l, W.jigMode === k, () => { W.jigMode = k; })); } step('Lambai ±', 'cutW', 0, 16, v => v + ' blk'); }
-        if (W.carp === 'chisel') { h('Shape'); { const r = row(); [['square', '▪ Chorus'], ['round', '● Gol'], ['v', '▼ V']].forEach(([k, l]) => chip(r, l, W.chiMode === k, () => { W.chiMode = k; })); } step('Size', 'chiSize', 1, 4, v => v + '/8'); step('Gehrai', 'chiDepth', 1, 4, v => v + '/8'); }
+        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block par rakho aur 🛠 dabao. Kata hua block save, undo, copy/paste, export sab mein chalta hai.'));
+        W.carp = 'laser';
+        h('🔦 Laser Cutter');
+        step('Speed', 'lzS', 1, 5, v => ['Bahut dheera', 'Dheera', 'Normal', 'Tez', 'Bahut tez'][v - 1] || v);
+        step('Gehrai', 'lzD', 0, 4, v => ['1/8 khurch', '2/8', '4/8 aadha', '1 block', 'Aar-paar'][v] || v);
+        step('Motai', 'lzW', 0, 2, v => ['Patli', 'Normal', 'Moti'][v] || v);
+        h('Kata hua tukda'); { const r = row(); chip(r, W.pieceMine !== false ? '⛏ Tukda hatao: ON' : '⛏ Tukda hatao: OFF', true, () => { W.pieceMine = W.pieceMine === false; }); }
+        c.appendChild(el('div', 'font-size:11px;opacity:.8;margin-top:6px;line-height:1.4;white-space:pre-line', '• 🛠 ek tap = ek cut. Tap karte raho to cut chalta rahega.\n• 🛠 dabake rakho = laser lagatar katta jayega, jahan crosshair le jaoge.\n• Speed se kitna tez katega wo chuno.\n• ⛏ kate hue block par: sirf alag hua tukda hatata hai (tukda alag karne ke liye Gehrai = Aar-paar rakho).'));
         const cl = el('div', 'padding:10px;border-radius:8px;text-align:center;background:#2a3150;margin-top:10px', 'Close'); cl.onpointerdown = e => { e.stopPropagation(); m.remove(); st.menu = st.inv = false; }; c.appendChild(cl);
       }
-      mkBtn('🛠', 'right:18px;bottom:calc(298px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doCarp, () => (W.carp === 'chisel' || W.carp === 'laser' ? 70 : 600000));
+      mkBtn('🛠', 'right:18px;bottom:calc(298px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doCarp, () => [220, 130, 80, 45, 22][clamp((W.lzS || 3) - 1, 0, 4)]);
       mkBtn('🪵', 'right:84px;bottom:calc(306px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openCarp());
       window.__forgeCutRefs = () => { const r = []; try { IV.back.concat(IV.hot).forEach(it => { if (it) { if (it.id) r.push(it.id); if (it.m) r.push(it.m); } }); } catch (e) { } return r; };
       // ---- 📏 SIZE PANEL: dig size / depth / shape + block size (v13-6) ----
@@ -39000,13 +39005,18 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
   function admobDebugToast(msg) {
     console.log('[AdMob debug]', msg);
   }
-  window.addEventListener('load', () => {
+  let __bannerShown = false, __bannerBusy = false;
+  function __initBanner() {
+    if (__bannerShown || __bannerBusy) return;
+    __bannerBusy = true;
     try {
       if (!window.Capacitor) {
+        __bannerBusy = false;
         admobDebugToast('window.Capacitor is missing — Capacitor bridge did not load (expected if opened as a plain webpage).');
         return;
       }
       if (!Capacitor.Plugins || !Capacitor.Plugins.AdMob) {
+        __bannerBusy = false;
         admobDebugToast('Capacitor loaded but AdMob plugin is missing — plugin not bundled into this build.');
         return;
       }
@@ -39052,15 +39062,19 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
             margin: 0,
           });
         })
-        .then(() => admobDebugToast('showBanner() succeeded.'))
+        .then(() => { __bannerShown = true; __bannerBusy = false; admobDebugToast('showBanner() succeeded.'); })
         .catch((err) => {
+          __bannerBusy = false;
           if (err && err.message === 'no-consent') return;
           admobDebugToast('FAILED — ' + (err && (err.message || err.code || JSON.stringify(err))));
         });
     } catch (e) {
+      __bannerBusy = false;
       admobDebugToast('exception — ' + e.message);
     }
-  });
+  }
+  window.__forgeRetryAds = __initBanner; // called by the internet watcher when connection returns
+  window.addEventListener('load', __initBanner);
 </script>
 <script>
 /* Quick Menu sheet — labelled, grouped access to every top-bar action (replaces the hidden horizontal scroll). */
@@ -39434,6 +39448,82 @@ function resetEnh(){try{ECS.forEach(r=>{r.dead=true;try{r.t&&r.t.dispose();r.b&&
  const v=vb();if(!v)return;const list=[];Object.keys(MT).forEach(k=>list.push(MT[k]));const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))});
  list.forEach(m=>{const u=m.userData;if(u&&u.o){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;delete u.o;m.needsUpdate=true}if(u)u.eh=null});v._t.env.requestRender()}catch(e){console.error('resetEnh',e)}}
 window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:resetEnh};loop();
+})();
+</script>
+<script>
+/* ===== INTERNET REMINDER =====
+   Neutral wording (online features / sync). Real reachability check (not just navigator.onLine, which stays true on
+   Wi-Fi with no internet).
+   • No network at all (Wi-Fi off + mobile data off): popup comes back every 1 minute until internet is on.
+   • Connected to Wi-Fi but that Wi-Fi has no internet: shown once, then only a gentle reminder every 15 minutes.
+   • Internet comes back: popup disappears by itself and the banner ad is retried. */
+(function () {
+  var KEY = 'forgeNetNotice',
+      AGAIN_NONET = 60 * 1000,        // no network at all -> every 1 minute
+      AGAIN_WIFI_DEAD = 15 * 60 * 1000, // Wi-Fi connected but no internet -> rarely
+      CHECK_EVERY = 10 * 1000, PROBE_MS = 4000,
+      box = null, nextShowAt = 0, state = 'unknown', busy = false, lastWifiShown = 0;
+  var PROBE_URL = 'https://www.gstatic.com/generate_204';
+
+  function enabled() { try { return localStorage.getItem(KEY) !== '0'; } catch (e) { return true; } }
+  function linkType() { // 'wifi' | 'cellular' | 'none' | 'unknown'
+    try {
+      var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (c && c.type) { if (c.type === 'wifi' || c.type === 'ethernet') return 'wifi'; if (c.type === 'cellular') return 'cellular'; if (c.type === 'none') return 'none'; }
+    } catch (e) { }
+    return 'unknown';
+  }
+  function probe() { // resolves true only if the internet really answers
+    if (navigator.onLine === false) return Promise.resolve(false);
+    return new Promise(function (res) {
+      var done = false, ac = window.AbortController ? new AbortController() : null;
+      var t = setTimeout(function () { if (!done) { done = true; try { ac && ac.abort(); } catch (e) { } res(false); } }, PROBE_MS);
+      fetch(PROBE_URL + '?_=' + Date.now(), { mode: 'no-cors', cache: 'no-store', signal: ac ? ac.signal : undefined })
+        .then(function () { if (!done) { done = true; clearTimeout(t); res(true); } })
+        .catch(function () { if (!done) { done = true; clearTimeout(t); res(false); } });
+    });
+  }
+  function hide() { if (box) { box.remove(); box = null; } }
+  function closeIt() { hide(); nextShowAt = Date.now() + (state === 'wifi-dead' ? AGAIN_WIFI_DEAD : AGAIN_NONET); }
+  function show(kind) {
+    if (box || !enabled()) return;
+    box = document.createElement('div');
+    box.setAttribute('role', 'alert');
+    box.style.cssText = 'position:fixed;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));z-index:2147483000;background:#1d2440;color:#fff;border:1px solid #4a5bff;border-radius:12px;padding:12px 14px;font:13px/1.4 system-ui,sans-serif;display:flex;gap:10px;align-items:center;box-shadow:0 6px 20px rgba(0,0,0,.5)';
+    var t = document.createElement('div'); t.style.flex = '1';
+    t.innerHTML = kind === 'wifi-dead'
+      ? '<b>📶 Wi-Fi mein internet nahi aa raha</b><br>Library aur online features ke liye working internet chahiye. Mobile data on kar sakte ho.'
+      : '<b>📶 Internet connection chahiye</b><br>Library, sync aur online features ke liye internet on rakho.';
+    var x = document.createElement('div'); x.textContent = '✕';
+    x.style.cssText = 'padding:6px 12px;font-size:18px;border-radius:8px;background:#2a3150;touch-action:manipulation';
+    x.addEventListener('click', function (e) { e.stopPropagation(); closeIt(); });
+    box.appendChild(t); box.appendChild(x); document.body.appendChild(box);
+  }
+  function onBackOnline() {
+    var wasShowing = !!box; hide(); nextShowAt = 0;
+    if (wasShowing) { try { window.toast && window.toast('📶 Internet wapas aa gaya', 1500); } catch (e) { } }
+    try { window.__forgeRetryAds && window.__forgeRetryAds(); } catch (e) { }
+  }
+  function check() {
+    if (busy) return; busy = true;
+    probe().then(function (ok) {
+      busy = false;
+      var prev = state;
+      if (ok) { state = 'online'; if (prev !== 'online') onBackOnline(); return; }
+      state = linkType() === 'wifi' ? 'wifi-dead' : 'no-net';
+      if (prev !== state) { hide(); if (state === 'no-net') nextShowAt = 0; }
+      var now = Date.now();
+      if (box || now < nextShowAt) return;
+      if (state === 'wifi-dead') { if (lastWifiShown && now - lastWifiShown < AGAIN_WIFI_DEAD) return; lastWifiShown = now; }
+      show(state);
+    });
+  }
+  window.addEventListener('offline', function () { setTimeout(check, 300); });
+  window.addEventListener('online', function () { setTimeout(check, 500); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+  setInterval(check, CHECK_EVERY);
+  setTimeout(check, 2500);
+  window.ForgeNetNotice = { enable: function (v) { try { localStorage.setItem(KEY, v ? '1' : '0'); } catch (e) { } if (!v) hide(); else check(); }, enabled: enabled, check: check };
 })();
 </script>
 </body>
