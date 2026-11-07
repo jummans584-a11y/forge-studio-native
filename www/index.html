@@ -34173,7 +34173,6 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       note('Minecraft jaisa: block grid par rakho, todo, ghar banao. Ek ungli se ghumao (camera), tap = tool ka kaam. 🕳/⛰ tool mein ungli ghisao.');
       { const gb = rowEl(true); gb.appendChild(btn('🎮 Game mein kholo — character ban kar banao (auto-save)', () => { try { window.ForgeTerrainGame.open(); } catch (e) { toast('Terrain Game error: ' + e.message, 3000); } }, true)); }
       { const er = rowEl(true); er.appendChild(btn('✨ Texture Enhancer (strength slider)', () => { if (window.RealLife) window.RealLife.panel(); }, true)); }
-      toggleRow('🌍 Real-Life Mode (blocks = asli cheezen, asli collision)', !!(window.RealLife && window.RealLife.on()), v => { if (window.RealLife) window.RealLife.set(v); });
       const hb = mkEl('div', 'display:flex;gap:4px;align-items:center;margin:2px 0 6px;overflow-x:auto;');
       for (let i = 0; i < 9; i++) {
         const d = W.defs.get(W.hot[i]), b = mkEl('button', 'position:relative;flex:0 0 auto;width:38px;height:38px;padding:2px;border-radius:7px;background:var(--panel-2);border:2px solid ' + (i === W.slot ? 'var(--accent)' : 'var(--line)') + ';');
@@ -34184,7 +34183,8 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const cd = curDef(); dock.appendChild(mkEl('div', 'font-size:11px;color:var(--ink-dim);margin:0 2px 4px;', cd ? 'Chuna hua: ' + cd.name + (cd.shape === 'slab' ? ' (aadha block)' : '') : 'Slot empty — open 🎒'));
       texPackUI();
       sizeUI();
-      const tr = rowEl(true); [['place', '➕ Place'], ['break', '⛏ Break'], ['pick', '🧪 Pick'], ['replace', '🖌 Replace'], ['sand', '🪚 Sandpaper'], ['carp', '🪵 Carpentry'], ['dig', '🕳 Dig Pit'], ['fill', '⛰ Fill'], ['select', '▭ Select'], ['paste', '📋 Paste']].forEach(([t, l]) => tr.appendChild(btn(l, () => setTool(t), W.tool === t)));
+      if (W.tool === 'carp') W.tool = 'place'; // laser/carpentry tool removed
+      const tr = rowEl(true); [['place', '➕ Place'], ['break', '⛏ Break'], ['pick', '🧪 Pick'], ['replace', '🖌 Replace'], ['sand', '🪚 Sandpaper'], ['dig', '🕳 Dig Pit'], ['fill', '⛰ Fill'], ['select', '▭ Select'], ['paste', '📋 Paste']].forEach(([t, l]) => tr.appendChild(btn(l, () => setTool(t), W.tool === t)));
       if (W.tool === 'place') { section('➕ Place Block'); note('Block ya ground par tap karo — naya block wahin lagega. Slope par "Fill Foundation" on ho to block hawa mein nahi latakta.'); toggleRow('Place on Ground (block zameen ke andar nahi dhansega)', W.onGround, v => { W.onGround = v; }); toggleRow('Fill Foundation (fills down the slope)', W.foundation, v => { W.foundation = v; }); }
       else if (W.tool === 'break') { section('⛏ Break Block'); note('Tap a block. Ground ke liye 🕳 Dig Pit tool.'); }
       else if (W.tool === 'pick') { section('🧪 Pick'); note('Kisi bane hue block par tap karo — wahi block hotbar mein aa jayega.'); }
@@ -34206,20 +34206,6 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
           const lr = rowEl(true); [[1, 'Halka'], [2, 'Medium'], [3, 'Zyada'], [4, 'Gol']].forEach(([n, l]) => lr.appendChild(btn(l, () => { W.sandLvl = n; if (W.sandMode === 'reset') W.sandMode = 'smooth'; buildTerrainDock(); }, W.sandMode !== 'reset' && W.sandLvl === n)));
           const sr = rowEl(true); sr.appendChild(btn(W.sandMode === 'reset' ? '▭ Re-sharpen Selected Area' : '▭ Poore area ke bahar ke kinare ghiso', sandSelection, true));
         } else note('Poori imaarat / deewar ek saath ghisni ho to pehle ▭ Select se area chuno, phir yahan wapas aao.');
-      }
-      else if (W.tool === 'carp') {
-        section('🔦 Laser — kaato');
-        note('Har block 8×8×8 chhote tukdon ka hota hai, isliye aap ek block ko aadha, chauthai ya kisi bhi shape mein kaat sakte ho. Kata hua block ab bhi normal block hai: undo, save, copy/paste, export sab chalte hain. Seedhi / darwaza / fence jaise shaped blocks nahi katte.');
-        W.carp = 'laser'; section('🔦 Laser Cutter');
-        { const r1 = rowEl(true); [[0, '1/8 khurch'], [1, '2/8'], [2, '4/8 aadha'], [3, '1 block'], [4, 'Aar-paar']].forEach(([k, l]) => r1.appendChild(btn(l, () => { W.lzD = k; buildTerrainDock(); }, (W.lzD == null ? 2 : W.lzD) === k))); section('Laser ki motai'); const r2 = rowEl(true); [[0, 'Patli'], [1, 'Normal'], [2, 'Moti']].forEach(([k, l]) => r2.appendChild(btn(l, () => { W.lzW = k; buildTerrainDock(); }, (W.lzW == null ? 1 : W.lzW) === k))); note('Block par tap karo — jahan tap karoge wahan laser ek cut lagata hai. Poori tarah continuous laser (dabake rakhna) 🎮 Game mein milta hai.'); }
-        const axisRow = () => { section('Kis disha mein kaatna'); const r = rowEl(true); [['auto', '🧭 Auto'], ['x', '⬌ Dayen-bayen'], ['y', '⬍ Upar-neeche'], ['z', '⤢ Aage-peeche']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.sawAxis = k; buildTerrainDock(); }, W.sawAxis === k))); section('Kaun sa hissa hatana'); const r2 = rowEl(true); [['small', 'Chhota tukda'], ['plus', '+ taraf (upar/aage/dayen)'], ['minus', '− taraf']].forEach(([k, l]) => r2.appendChild(btn(l, () => { W.sawRm = k; buildTerrainDock(); }, W.sawRm === k))); };
-        const widthSl = lbl => { const sl = mkSlider(0, 16, 1, W.cutW | 0, v => { W.cutW = Math.round(v); }, v => Math.round(v) === 0 ? 'sirf 1' : '±' + Math.round(v) + ' blk'); dock.appendChild(mkFieldGrid([mkField('↔', lbl, sl)], 1)); };
-        if (W.carp === 'saw') { axisRow(); note('Block ke us point par tap karo jahan kaatna hai: cut nazdeeki 1/8 line par lagta hai. Auto = ungli jis taraf kinare ke paas hai us disha mein kaatta hai.'); }
-        else if (W.carp === 'circ') { axisRow(); widthSl('Kitne blocks ek saath (dono taraf)'); const dp = mkSlider(1, 8, 1, W.cutD | 0, v => { W.cutD = Math.round(v); }, v => Math.round(v) + ' blk gehra'); dock.appendChild(mkFieldGrid([mkField('⬇', 'Kitna gehra kaate', dp)], 1)); note('Power tool: ek hi tap mein poori line / deewar ek barabar kat jaati hai.'); }
-        else if (W.carp === 'jig') { section('Kaat ka type'); const r = rowEl(true); [['slope', '◢ Tirchha (slope / chhat)'], ['round', '◠ Gol (quarter round)']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.jigMode = k; buildTerrainDock(); }, W.jigMode === k))); widthSl('Kitne blocks ki line (dono taraf)'); note('Face par jahan tap karoge wahan se sabse nazdeeki kinare tak tirchha / gol kat banta hai. Kinare ke paas tap = chhota kat, door tap = bada kat.'); }
-        else if (W.carp === 'chisel') { section('Chisel ka shape'); const r = rowEl(true); [['square', '▪ Chorus gadda'], ['round', '● Gol'], ['v', '▼ V-khancha']].forEach(([k, l]) => r.appendChild(btn(l, () => { W.chiMode = k; buildTerrainDock(); }, W.chiMode === k)));
-          const s1 = mkSlider(1, 4, 1, W.chiSize | 0, v => { W.chiSize = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)'), s2 = mkSlider(1, 4, 1, W.chiDepth | 0, v => { W.chiDepth = Math.round(v); }, v => Math.round(v) + ' (1/8 blk)');
-          dock.appendChild(mkFieldGrid([mkField('📐', 'Size', s1), mkField('⬇', 'Gehrai', s2)], 2)); note('Ungli block par rakh kar chalao: chisel apni jagah ek baar kaat ta hai, ungli aage badhaoge to khancha banta jayega. Wahi jagah dobara tap karoge to aur gehra jayega. Camera ghumane ke liye Orbit button.'); }
       }
       else if (W.tool === 'dig' || W.tool === 'fill') {
         section(W.tool === 'dig' ? '🕳 Dig Pit in Ground' : '⛰ Raise / Fill Ground');
@@ -38482,13 +38468,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const gh = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(S * 1.005, S * 1.005, S * 1.005)), new THREE.LineBasicMaterial({ color: 0x66ff99, depthTest: false })); gh.visible = false; gh.renderOrder = 999; sc.add(gh);
       // ---- aiming ----
       const fwd = new V3(), eye = new V3();
-      if (W.lzD == null) W.lzD = 2; if (W.lzW == null) W.lzW = 1; if (W.lzS == null) W.lzS = 3; if (W.pieceMine == null) W.pieceMine = true; W.carp = 'laser';
-      let lz = null, lzT = 0;   // laser beam visual
-      function beam(tp) {
-        if (!lz) { lz = new THREE.Mesh(new THREE.CylinderGeometry(.012, .012, 1, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: .92, depthTest: false })); lz.renderOrder = 997; sc.add(lz); }
-        const rt = new V3().crossVectors(fwd, new V3(0, 1, 0)).normalize(), o = new V3(eye.x, eye.y - .3, eye.z).addScaledVector(rt, .24).addScaledVector(fwd, .25), t = tp ? new V3(tp.x, tp.y, tp.z) : new V3(eye.x, eye.y, eye.z).addScaledVector(fwd, 6), d = t.clone().sub(o), len = d.length() || 1;
-        lz.position.copy(o).addScaledVector(d, .5); lz.scale.set(1, len, 1); lz.quaternion.setFromUnitVectors(new V3(0, 1, 0), d.normalize()); lz.visible = true; clearTimeout(lzT); lzT = setTimeout(() => { if (lz) lz.visible = false; }, 140);
-      }
+      if (W.pieceMine == null) W.pieceMine = true;
       // "Place on Ground": raise the cell so its floor is at/above the highest ground under it -> block sits ON the ground, not inside it
       function liftCell(cx, cz, cy) { if (!W.onGround) return cy; let gm = -Infinity; const x0 = cx * S, z0 = cz * S; [[.04, .04], [.96, .04], [.04, .96], [.96, .96], [.5, .5]].forEach(q => { const y = gy(x0 + q[0] * S, z0 + q[1] * S); if (y > gm) gm = y; }); return isFinite(gm) ? Math.max(cy, Math.ceil(gm / S - 0.02)) : cy; }
       function aim() {
@@ -38645,38 +38625,6 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       }
       mkBtn('🪚', 'right:84px;bottom:calc(236px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doSand, () => 90);
       mkBtn('⚙', 'right:150px;bottom:calc(244px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openSand());
-      // ---- 🪵 CARPENTRY (v20): Aari / Circular saw / Jigsaw / Chisel — aim the crosshair at a block, 🛠 = use, 🪵 = choose tool ----
-      function doCarp() {
-        if (st.mode === 'free') { E.toast('Carpentry grid blocks par chalti hai — 🧱 se grid mode lo', 1600); return; }
-        const a = aim(), lzr = W.carp === 'laser'; if (lzr) beam(a && a.kind === 'v' ? a.point : null);
-        if (!a) return; if (a.kind !== 'v') { if (!lzr) E.toast('Crosshair kisi bane hue block par rakho', 1300); return; }
-        const l = T.carpAct(a.cell, a.point, [a.place[0] - a.cell[0], a.place[1] - a.cell[1], a.place[2] - a.cell[2]], fwd);
-        if (!l.length) { const m = T.carpMsg(); if (m && !lzr) E.toast(m, 1500); return; } if (lzr) laserEdit(l); else edit(l);
-      }
-      function laserEdit(list) {
-        const m = new Map(); list.forEach(([x, y, z, t]) => { const k = E.key(x, y, z), old = W.cells.get(k) || 0; if (old === t) return; if (m.has(k)) m.get(k)[1] = t; else m.set(k, [old, t]); }); if (!m.size) return false; T.applyCh(m, false);
-        const now = performance.now(), last = st.hist[st.hist.length - 1];
-        if (last && last._lz && now - last._t < 1500) { m.forEach((v, k) => { const o = last.get(k); if (o) o[1] = v[1]; else last.set(k, v); }); last._t = now; }
-        else { m._lz = 1; m._t = now; st.hist.push(m); if (st.hist.length > 300) st.hist.shift(); } st.fut.length = 0; return true;
-      }
-      function openCarp() {
-        if (st.menu || st.inv) return; st.menu = true; const [m, c] = panel('🪵 Carpentry'); m.onpointerdown = e => { e.stopPropagation(); if (e.target === m) { m.remove(); st.menu = st.inv = false; } };
-        const row = () => { const r = el('div', 'display:flex;gap:6px;margin:6px 0;flex-wrap:wrap'); c.appendChild(r); return r; };
-        const chip = (r, t, on, f) => { const b = el('div', 'padding:8px 12px;border-radius:8px;text-align:center;flex:1;min-width:64px;background:' + (on ? '#4a5bff' : '#2a3150'), t); b.onpointerdown = e => { e.stopPropagation(); f(); m.remove(); st.menu = st.inv = false; openCarp(); }; r.appendChild(b); };
-        const h = t => c.appendChild(el('div', 'font-weight:700;margin:8px 0 4px;font-size:13px', t));
-        const step = (lbl, key, lo, hi, fmt) => { const r = row(); chip(r, '−', false, () => { W[key] = Math.max(lo, (W[key] | 0) - 1); }); chip(r, lbl + ': ' + fmt(W[key] | 0), true, () => { }); chip(r, '+', false, () => { W[key] = Math.min(hi, (W[key] | 0) + 1); }); };
-        c.appendChild(el('div', 'font-size:12px;opacity:.8;margin-bottom:6px', 'Crosshair block par rakho aur 🛠 dabao. Kata hua block save, undo, copy/paste, export sab mein chalta hai.'));
-        W.carp = 'laser';
-        h('🔦 Laser Cutter');
-        step('Speed', 'lzS', 1, 5, v => ['Bahut dheera', 'Dheera', 'Normal', 'Tez', 'Bahut tez'][v - 1] || v);
-        step('Gehrai', 'lzD', 0, 4, v => ['1/8 khurch', '2/8', '4/8 aadha', '1 block', 'Aar-paar'][v] || v);
-        step('Motai', 'lzW', 0, 2, v => ['Patli', 'Normal', 'Moti'][v] || v);
-        h('Kata hua tukda'); { const r = row(); chip(r, W.pieceMine !== false ? '⛏ Tukda hatao: ON' : '⛏ Tukda hatao: OFF', true, () => { W.pieceMine = W.pieceMine === false; }); }
-        c.appendChild(el('div', 'font-size:11px;opacity:.8;margin-top:6px;line-height:1.4;white-space:pre-line', '• 🛠 ek tap = ek cut. Tap karte raho to cut chalta rahega.\n• 🛠 dabake rakho = laser lagatar katta jayega, jahan crosshair le jaoge.\n• Speed se kitna tez katega wo chuno.\n• ⛏ kate hue block par: sirf alag hua tukda hatata hai (tukda alag karne ke liye Gehrai = Aar-paar rakho).'));
-        const cl = el('div', 'padding:10px;border-radius:8px;text-align:center;background:#2a3150;margin-top:10px', 'Close'); cl.onpointerdown = e => { e.stopPropagation(); m.remove(); st.menu = st.inv = false; }; c.appendChild(cl);
-      }
-      mkBtn('🛠', 'right:18px;bottom:calc(298px + env(safe-area-inset-bottom));width:56px;height:56px;font-size:22px;', doCarp, () => [220, 130, 80, 45, 22][clamp((W.lzS || 3) - 1, 0, 4)]);
-      mkBtn('🪵', 'right:84px;bottom:calc(306px + env(safe-area-inset-bottom));width:40px;height:40px;font-size:16px;', () => openCarp());
       window.__forgeCutRefs = () => { const r = []; try { IV.back.concat(IV.hot).forEach(it => { if (it) { if (it.id) r.push(it.id); if (it.m) r.push(it.m); } }); } catch (e) { } return r; };
       // ---- 📏 SIZE PANEL: dig size / depth / shape + block size (v13-6) ----
       if (!W._gameDig) { W._gameDig = 1; W.digSize = 1; W.digDepth = 1; } // first time: small hole (1 block) instead of the big Build-tab default
@@ -39136,116 +39084,16 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
 if(window.RealLife)return;
 const T=THREE,KEY='forgeRealLife',VF=1e6,NZ=8192,NY=2048,OX=4096,OZ=4096,OY=1024;
 let on=false,rg=null,sig='',lastB=0,btn=null,lastBtn='';
-try{on=localStorage.getItem(KEY)==='1'}catch(e){}
+try{localStorage.removeItem(KEY)}catch(e){}
 const vb=()=>{const v=window.VoxelBuild;return v&&v._w&&v._t&&v._t.env?v:null};
 const rnd=s=>()=>((s=(s*1664525+1013904223)>>>0)/4294967296);
-const M=(x,y,z,rx,ry,rz,sx,sy,sz)=>new T.Matrix4().compose(new T.Vector3(x||0,y||0,z||0),new T.Quaternion().setFromEuler(new T.Euler(rx||0,ry||0,rz||0)),new T.Vector3(sx==null?1:sx,sy==null?1:sy,sz==null?1:sz));
-const B=(w,h,d)=>new T.BoxGeometry(w,h,d);
-function mg(parts){const P=[],N=[],U=[],C=[],c=new T.Color();
- parts.forEach(q=>{let g=q[0];g=g.index?g.toNonIndexed():g.clone();if(q[1])g.applyMatrix4(q[1]);
-  const p=g.attributes.position.array,n=g.attributes.normal.array,u=g.attributes.uv?g.attributes.uv.array:null,cn=g.attributes.position.count;
-  if(q[2]!=null)c.set(q[2]);else c.setRGB(1,1,1);
-  for(let i=0;i<p.length;i++){P.push(p[i]);N.push(n[i])}
-  for(let i=0;i<cn;i++){const ao=.78+.22*Math.min(1,Math.max(0,p[i*3+1]+.5));U.push(u?u[i*2]:0,u?u[i*2+1]:0);C.push(c.r*ao,c.g*ao,c.b*ao)}});
- const o=new T.BufferGeometry();
- o.setAttribute('position',new T.Float32BufferAttribute(P,3));o.setAttribute('normal',new T.Float32BufferAttribute(N,3));
- o.setAttribute('uv',new T.Float32BufferAttribute(U,2));o.setAttribute('color',new T.Float32BufferAttribute(C,3));return o}
-function blob(x,z,r,sy,amp,sd,det,col){const g=new T.IcosahedronGeometry(1,det||3),p=g.attributes.position;
- for(let i=0;i<p.count;i++){const a=p.getX(i),b=p.getY(i),c=p.getZ(i),n=Math.sin(a*3+sd)*Math.sin(b*4+sd*1.7)*Math.sin(c*3.5+sd*.6)+.5*Math.sin(a*9+c*8+sd)*Math.sin(b*8-sd),k=r*(1+amp*n);p.setXYZ(i,a*k,Math.max(b*k*sy,-r*sy*.55),c*k)}
- g.computeVertexNormals();return[g,M(x,-.5+r*sy*.55,z),col]}
-// ---------- procedural real-world textures + materials ----------
-const TX={},MT={};
-function tex(k){if(TX[k])return TX[k];const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d'),r=rnd(k.length*977+5);
- g.fillStyle='#d2d2d2';g.fillRect(0,0,256,256);for(let i=0;i<46;i++){const v=120+r()*130|0;g.fillStyle='rgba('+v+','+v+','+v+',.13)';g.beginPath();g.arc(r()*256,r()*256,10+r()*34,0,6.3);g.fill()}const st=(k==='wood'||k==='bark')?14:2;
- for(let i=0;i<7000;i++){const v=140+r()*115|0;g.fillStyle='rgba('+v+','+v+','+v+',.55)';g.fillRect(r()*256,r()*256,1+r()*2,1+r()*st)}
- if(st>2||k==='metal'||k==='stone')for(let i=0;i<(k==='stone'?9:28);i++){g.strokeStyle='rgba(40,30,20,'+(.12+r()*.18)+')';g.beginPath();let x=r()*256,y=r()*256;g.moveTo(x,y);for(let j=0;j<5;j++){if(k==='metal'){x+=26;y+=r()*2-1}else if(k==='stone'){x+=r()*30-15;y+=r()*30-15}else{y+=26;x+=Math.sin(j+i)*3}g.lineTo(x,y)}g.stroke()}
- if(k==='conc'){g.fillStyle='rgba(30,30,30,.55)';[[40,40],[216,40],[40,216],[216,216]].forEach(p=>{g.beginPath();g.arc(p[0],p[1],7,0,6.3);g.fill()})}
- const t=new T.CanvasTexture(c);t.wrapS=t.wrapT=T.RepeatWrapping;t.encoding=T.sRGBEncoding;t.anisotropy=4;return TX[k]=t}
-const TU={value:0};let HS=0,enh=1;try{const q=parseFloat(localStorage.getItem('forgeTexEnh'));if(q>=0&&q<=3)enh=q}catch(e){}
-function fin(l,m){
- if(l.sw){HS=1;m.customProgramCacheKey=()=>'rlsw';m.onBeforeCompile=sh=>{sh.uniforms.uT=TU;sh.vertexShader='uniform float uT;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n#ifdef USE_INSTANCING\ntransformed.x+=sin(uT*1.7+instanceMatrix[3].x*1.3+position.y*5.0)*0.035*max(position.y+0.5,0.0);\ntransformed.z+=cos(uT*1.3+instanceMatrix[3].z*1.1+position.x*5.0)*0.025*max(position.y+0.5,0.0);\n#endif')}}return m}
-function mat(l){const k=[l.tx,l.c,l.r,l.m,l.o,l.em,l.ds,l.sw].join();
- return MT[k]||(MT[k]=fin(l,new T.MeshStandardMaterial({map:tex(l.tx||'n'),bumpMap:tex(l.tx||'n'),bumpScale:l.tx==='n'?.4:1.4,color:l.c||'#ffffff',roughness:l.r==null?.9:l.r,metalness:l.m||0,vertexColors:true,transparent:l.o<1,opacity:l.o==null?1:l.o,depthWrite:!(l.o<1),side:l.ds?T.DoubleSide:T.FrontSide,emissive:l.em||'#000000',emissiveIntensity:l.em?1.1:0})))}
-// ---------- real-life objects: g = geometry layers (unit cell, centred), b = REAL collision boxes (cell-local 0..1) ----------
-const FULL=[[.01,0,.01,.99,1,.99]],W1=g=>mg([[g]]);
-const K={
-rock:{g:d=>{const a=rnd((d.id|0)*7+3),p=[blob(0,0,.46,.82,.2,a()*9)];for(let i=0;i<3;i++)p.push(blob((a()-.5)*.75,(a()-.5)*.75,.12+a()*.1,.8,.3,a()*9,2));const o=/obsid/i.test(d.name);return[{g:mg(p),tx:'stone',c:d.color,r:o?.12:.95,m:o?.3:0}]},b:()=>[[.08,0,.08,.92,.78,.92]]},
-mound:{g:d=>{const a=rnd((d.id|0)*5+1),p=[blob(0,0,.5,1.05,.1,a()*9)];for(let i=0;i<9;i++)p.push(blob((a()-.5)*.8,(a()-.5)*.8,.05+a()*.05,.8,.3,a()*9,1));return[{g:mg(p),tx:'n',c:d.color,r:1}]},b:()=>[[0,0,0,1,.62,1]]},
-grass:{g:d=>{const a=rnd(77),P=[],N=[],C=[],U=[],top=.2;
- for(let i=0;i<380;i++){const x=(a()-.5)*.92,z=(a()-.5)*.92,h=.1+a()*.2,l=(a()-.5)*.1,w=.02,f=.7+a()*.5;P.push(x-w,top,z,x+w,top,z,x+l,top+h,z+l*.7);for(let j=0;j<3;j++){N.push(0,1,0);U.push(0,0)}C.push(.18*f,.35*f,.08*f,.18*f,.35*f,.08*f,.5*f,.75*f,.2*f)}
- const o=new T.BufferGeometry();o.setAttribute('position',new T.Float32BufferAttribute(P,3));o.setAttribute('normal',new T.Float32BufferAttribute(N,3));o.setAttribute('uv',new T.Float32BufferAttribute(U,2));o.setAttribute('color',new T.Float32BufferAttribute(C,3));
- return[{g:mg([blob(0,0,.5,.95,.07,3.3)]),tx:'n',c:'#7a5638',r:1},{g:o,tx:'n',c:'#ffffff',r:.8,ds:true,sw:1}]},b:()=>[[0,0,0,1,.76,1]]},
-leaves:{g:d=>{const a=rnd(9),p=[];for(let i=0;i<130;i++){const u=a()*6.28,v=Math.acos(2*a()-1),r=.1+a()*.34;p.push([new T.PlaneGeometry(.17,.1),M(r*Math.sin(v)*Math.cos(u),r*Math.cos(v),r*Math.sin(v)*Math.sin(u),a()*6,a()*6,a()*6),new T.Color().setHSL(.27+a()*.06,.55,.2+a()*.2).getHex()])}
- for(let i=0;i<5;i++)p.push(blob((a()-.5)*.6,(a()-.5)*.6,.2,.8,.3,a()*9,1,0x2f5f22));return[{g:mg(p),tx:'n',c:'#ffffff',r:.8,ds:true,sw:1}]},b:()=>[]},
-log:{g:d=>{const a=rnd(4),sd=a()*9,cy=new T.CylinderGeometry(.44,.46,1,22,12,true),p=cy.attributes.position;
- for(let i=0;i<p.count;i++){const x=p.getX(i),z=p.getZ(i),an=Math.atan2(z,x),k=1+.05*Math.sin(an*9+sd)*Math.sin(p.getY(i)*3+sd)+.025*Math.sin(an*23);p.setXYZ(i,x*k,p.getY(i),z*k)}
- cy.computeVertexNormals();const bi=/birch/i.test(d.name),cc=bi?0xd9c9a0:0xc8a46c,q=[[cy,null,d.color]];
- [.5,-.5].forEach((y,j)=>{for(let i=0;i<5;i++)q.push([new T.RingGeometry(i*.085+.001,(i+1)*.085,24),M(0,y,0,j?Math.PI/2:-Math.PI/2),i%2?0xa8844d:cc])});
- return[{g:mg(q),tx:'bark',c:'#ffffff',r:.95}]},b:()=>[[.1,0,.28,.9,1,.72],[.28,0,.1,.72,1,.9]]},
-wood:{g:d=>{const a=rnd((d.id|0)+2),p=[];for(let i=0;i<5;i++){const c=.86+a()*.2;p.push([B(.985+a()*.015,.19,.99),M((a()-.5)*.01,-.4+i*.2,0),new T.Color(c,c*.97,c*.92).getHex()])}return[{g:mg(p),tx:'wood',c:d.color,r:.75}]},b:()=>FULL},
-brick:{g:d=>{const a=rnd((d.id|0)*3+1),p=[[B(.97,.99,.9),null,0xb8b1a2]],c=new T.Color(d.color);
- for(let r=0;r<9;r++)for(let w=0;w<2;w++)for(let i=0;i<4;i++){const x=-.375+i*.25+((r&1)?.125:0);if(x>.38)continue;const f=.8+a()*.35;p.push([B(.235,.1,.44),M(x,-.5+.055+r*.111,-.25+w*.5),c.clone().multiplyScalar(f).getHex()])}
- return[{g:mg(p),tx:'stone',c:'#ffffff',r:.9}]},b:()=>FULL},
-strata:{g:d=>{const a=rnd(5),p=[];for(let i=0;i<7;i++){const f=.85+a()*.25;p.push([B(.96+a()*.04,.138,.97+a()*.03),M((a()-.5)*.02,-.43+i*.143,0),new T.Color(f,f*.96,f*.88).getHex()])}return[{g:mg(p),tx:'stone',c:d.color,r:.95}]},b:()=>FULL},
-roof:{g:d=>{const a=rnd(8),sh=new T.Shape();sh.moveTo(-.5,-.5);sh.lineTo(.5,-.5);sh.lineTo(.5,.5);sh.lineTo(-.5,-.5);
- const w=new T.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false});w.translate(0,0,-.5);w.rotateY(-Math.PI/2);const p=[[w,null,0x4a3a2e]],c=new T.Color(d.color);
- for(let i=0;i<6;i++)for(let j=0;j<4;j++){const x=-.375+j*.25+((i&1)?.06:0),z=-.42+i*.17,f=.8+a()*.3;p.push([B(.235,.04,.24),M(x,z+.025,z,-Math.PI/4,0,0),c.clone().multiplyScalar(f).getHex()])}
- return[{g:mg(p),tx:'stone',c:'#ffffff',r:.7}]},b:()=>[[0,0,0,1,.34,1],[0,.34,.33,1,.67,1],[0,.67,.66,1,1,1]]},
-floor:{g:d=>{const p=[[B(.99,.08,.99),M(0,-.46,0),0x8c8c8c]];for(let i=0;i<2;i++)for(let j=0;j<2;j++)p.push([B(.485,.1,.485),M(-.25+i*.5,-.45,-.25+j*.5),((i+j)&1)?0x202024:0xf2efe8]);return[{g:mg(p),tx:'stone',c:'#ffffff',r:.2,m:.05}]},b:()=>[[0,0,0,1,.1,1]]},
-glass:{g:d=>{const f=[];[[1,.06,.08,0,.47],[1,.06,.08,0,-.47],[.06,1,.08,.47,0],[.06,1,.08,-.47,0]].forEach(q=>f.push([B(q[0],q[1],q[2]),M(q[3],q[4],0)]));return[{g:mg(f),tx:'metal',c:'#9aa0a6',r:.4,m:.9},{g:W1(B(.94,.94,.018)),tx:'n',c:d.color,r:.03,m:.1,o:.28}]},b:()=>[[0,0,.45,1,1,.55]]},
-ice:{g:d=>{const a=rnd(12),p=[];for(let i=0;i<5;i++){const h=.5+a()*.5,r=.12+a()*.12;p.push([new T.ConeGeometry(r,h,6),M((a()-.5)*.6,-.5+h/2,(a()-.5)*.6,(a()-.5)*.35,a()*3,(a()-.5)*.35)])}p.push([new T.CylinderGeometry(.46,.5,.16,7),M(0,-.42,0)]);return[{g:mg(p),tx:'n',c:d.color,r:.05,m:.1,o:.7}]},b:()=>[[.1,0,.1,.9,.8,.9]]},
-water:{g:d=>{const s=new T.PlaneGeometry(1,1,14,14);s.rotateX(-Math.PI/2);const p=s.attributes.position;for(let i=0;i<p.count;i++)p.setY(i,.36+.018*Math.sin(p.getX(i)*17)*Math.cos(p.getZ(i)*13));s.computeVertexNormals();
- return[{g:mg([[s]]),tx:'n',c:d.color,r:.08,m:.15,o:.62},{g:mg([[B(.99,.86,.99),M(0,-.07,0)]]),tx:'n',c:d.color,r:.2,o:.4}]},b:()=>[]},
-lamp:{g:d=>[{g:mg([[new T.CylinderGeometry(.2,.24,.08,12),M(0,-.46,0)],[new T.ConeGeometry(.24,.14,12),M(0,.26,0)],[new T.TorusGeometry(.12,.012,6,16),M(0,.38,0)],[B(.025,.5,.025),M(.19,-.2,.19)],[B(.025,.5,.025),M(-.19,-.2,.19)],[B(.025,.5,.025),M(.19,-.2,-.19)],[B(.025,.5,.025),M(-.19,-.2,-.19)]]),tx:'metal',c:'#2b2b2b',r:.4,m:.8},{g:W1(new T.CylinderGeometry(.18,.18,.48,14).translate(0,-.2,0)),tx:'n',c:d.color,r:.2,o:.9,em:d.color}],b:()=>[[.25,0,.25,.75,.85,.75]]},
-gem:{g:d=>{const a=rnd(31),p=[];for(let i=0;i<7;i++){const h=.4+a()*.5,r=.1+a()*.12;p.push([new T.OctahedronGeometry(r,0),M((a()-.5)*.7,-.5+h*.5,(a()-.5)*.7,(a()-.5)*.4,a()*3,(a()-.5)*.4,1,h/(2*r),1)])}return[{g:mg(p),tx:'n',c:d.color,r:.05,m:.2,o:.85}]},b:()=>[[.1,0,.1,.9,.8,.9]]},
-ingot:{g:d=>{const ig=B(.47,.23,.47),p=ig.attributes.position,q=[];for(let i=0;i<p.count;i++)if(p.getY(i)>0){p.setX(i,p.getX(i)*.82);p.setZ(i,p.getZ(i)*.82)}ig.computeVertexNormals();
- for(let y=0;y<4;y++)for(let i=0;i<2;i++)for(let j=0;j<2;j++)q.push([ig,M(-.25+i*.5,-.375+y*.25,-.25+j*.5,0,(y&1)?1.5708:0,0)]);return[{g:mg(q),tx:'metal',c:d.color,r:.22,m:1}]},b:()=>FULL},
-block:{g:d=>[{g:W1(B(.985,.985,.985)),tx:/concrete/i.test(d.name)?'conc':'n',c:d.color,r:.85}],b:()=>FULL},
-boxes:{g:d=>{const rot=(((d.rot|0)%4)+4)%4,c=[1,0,-1,0][rot],s=[0,1,0,-1][rot],n=d.name||'',me=/iron|bars/i.test(n),st=/cobble|stone|brick|sandstone/i.test(n),gl=d.pat==='glass',tr=/torch/i.test(n);
- const parts=d.boxes.map(b=>{const x0=b[0]-.5,x1=b[3]-.5,z0=b[2]-.5,z1=b[5]-.5,ax=x0*c+z0*s,az=-x0*s+z0*c,bx=x1*c+z1*s,bz=-x1*s+z1*c,mx=Math.min(ax,bx),Mx=Math.max(ax,bx),mz=Math.min(az,bz),Mz=Math.max(az,bz);return[B(Math.max(.01,Mx-mx),Math.max(.01,b[4]-b[1]),Math.max(.01,Mz-mz)),M((mx+Mx)/2,(b[1]+b[4])/2-.5,(mz+Mz)/2)]});
- return[{g:mg(parts),tx:me?'metal':st?'stone':'wood',c:d.color,r:me?.35:.85,m:me?.9:0,o:gl?.3:1,em:tr?'#ff9a30':null}]},b:()=>null}
-};
-function kindOf(d){const n=d.name||'',p=d.pat;
- if(d.boxes)return'boxes';if(p==='lamp'||/lantern|lamp/i.test(n))return'lamp';if(p==='glass')return'glass';if(p==='ice')return'ice';if(p==='wave'||/water/i.test(n))return'water';
- if(p==='leaves')return'leaves';if(p==='grass')return'grass';if(p==='log'||/log/i.test(n))return'log';if(p==='planks'||p==='parquet'||/plank/i.test(n))return'wood';
- if(p==='brick'||p==='stonebrick'||/brick/i.test(n))return'brick';if(p==='roof')return'roof';if(p==='checker')return'floor';if(/diamond/i.test(n))return'gem';
- if(/iron|gold/i.test(n))return'ingot';if(p==='sandstone')return'strata';if(/smooth|polished|concrete|plaster/i.test(n))return'block';
- if(/dirt|snow|clay|terracotta|^sand$/i.test(n))return'mound';if(p==='cobble'||p==='speckle'||/stone|gravel|obsidian|coal/i.test(n))return'rock';return'block'}
-const DS=new WeakMap(),BC=new WeakMap(),BOXY={block:1,brick:1,wood:1,strata:1};
-function spec(d){let s=DS.get(d);if(s)return s;const k=kindOf(d),slab=d.shape==='slab',ls=K[k].g(d);
- if(slab)ls.forEach(l=>{l.g.scale(1,.5,1);l.g.translate(0,-.25,0)});
- s=DS.set(d,{k,ls:ls.map(l=>({geo:l.g,mt:mat(l)}))}).get(d);return s}
-window.__realOn=()=>on;
-window.__realBoxes=d=>{if(!on)return null;let r=BC.get(d);if(r!==undefined)return r;const k=kindOf(d);r=K[k].b(d);
- if(r&&d.shape==='slab')r=r.map(b=>[b[0],b[1]*.5,b[2],b[3],b[4]*.5,b[5]]);BC.set(d,r);return r};
-// ---------- scene sync ----------
-function build(v,g){const W=v._w,E=v._t.env,S=W.S||v.getBlockSize();
- for(let i=rg.children.length-1;i>=0;i--){const c=rg.children[i];rg.remove(c);if(c.dispose)c.dispose()}
- const bk=new Map(),lights=[],key=(x,y,z)=>((x+OX)*NZ+(z+OZ))*NY+(y+OY),kc=new Map();
- const defOf=t=>W.defs.get(t)||W.defs.get(t%VF),kOf=t=>{let k=kc.get(t);if(k==null){const d=defOf(t);k=d?kindOf(d):'';kc.set(t,k)}return k};
- const cov=(x,y,z)=>{for(const o of[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){const t=W.cells.get(key(x+o[0],y+o[1],z+o[2]));if(!t||!BOXY[kOf(t)])return false;const d=defOf(t);if(!d||d.shape==='slab')return false}return true};
- W.cells.forEach((t,k0)=>{const d=defOf(t);if(!d)return;const kd=kOf(t);
-  let k=k0,y=k%NY;k=(k-y)/NY;const z=k%NZ,x=(k-z)/NZ-OX;const zz=z-OZ,yy=y-OY;
-  if(BOXY[kd]&&cov(x,yy,zz))return;
-  const sp=spec(d),h=((x*73856093)^(yy*19349663)^(zz*83492791))>>>0,fix=kd==='glass'||kd==='roof'||kd==='boxes',org=kd==='rock'||kd==='mound'||kd==='grass'||kd==='leaves',j=org?1+((h%9)-4)*.01:1;
-  const m=M((x+.5)*S,(yy+.5)*S,(zz+.5)*S,0,fix?0:(h>>3&3)*Math.PI/2,0,S*j,S*j,S*j);
-  sp.ls.forEach((l,i)=>{const id=d.id+'|'+i;let b=bk.get(id);if(!b){b={l,a:[]};bk.set(id,b)}b.a.push(m)});
-  if(kd==='lamp'&&lights.length<6)lights.push([(x+.5)*S,(yy+.6)*S,(zz+.5)*S,d.color])});
- bk.forEach(b=>{const m=new T.InstancedMesh(b.l.geo,b.l.mt,b.a.length);m.frustumCulled=false;m.castShadow=!(b.l.mt.opacity<1);m.receiveShadow=true;b.a.forEach((q,i)=>m.setMatrixAt(i,q));m.instanceMatrix.needsUpdate=true;rg.add(m)});
- lights.forEach(q=>{const L=new T.PointLight(new T.Color(q[3]),1.1,S*7);L.position.set(q[0],q[1],q[2]);rg.add(L)});
- E.requestRender()}
+let enh=1;try{const q=parseFloat(localStorage.getItem('forgeTexEnh'));if(q>=0&&q<=3)enh=q}catch(e){}
+window.__realOn=()=>false;window.__realBoxes=()=>null; // Real-Life block mode removed (stubs kept so old callers are harmless)
 let b2=null;
-function ui(){const open=!!(window.ForgeTerrainGame&&window.ForgeTerrainGame.isOpen&&window.ForgeTerrainGame.isOpen()),s=(open?1:0)+':'+(on?1:0);if(s===lastBtn)return;lastBtn=s;
- if(!btn){btn=document.createElement('div');btn.style.cssText='position:fixed;left:8px;top:40%;z-index:100000;width:46px;height:46px;border-radius:50%;align-items:center;justify-content:center;font-size:22px;background:rgba(20,24,40,.85);color:#fff;border:2px solid #4a5bff;touch-action:manipulation;user-select:none;-webkit-user-select:none';btn.onpointerdown=e=>{e.stopPropagation();e.preventDefault();set(!on)};document.body.appendChild(btn)}
- if(!b2){b2=btn.cloneNode(false);b2.style.top='calc(40% + 54px)';b2.textContent='\u2728';b2.onpointerdown=e=>{e.stopPropagation();e.preventDefault();panel()};document.body.appendChild(b2)}b2.style.display=open?'flex':'none';btn.style.display=open?'flex':'none';btn.textContent=on?'\u{1F30D}':'\u{1F9F1}';btn.style.borderColor=on?'#3ddc84':'#4a5bff'}
-let fr=0;
-function loop(){requestAnimationFrame(loop);try{TU.value=performance.now()/1000;ui();const v=vb();if(!on||!v)return;if(HS&&(fr++%5===0))v._t.env.requestRender();const g=v._t.env.scene.getObjectByName('VoxelBuild');if(!g)return;
- if(!rg){rg=new T.Group();rg.name='RealLife'}if(rg.parent!==g)g.add(rg);
- let s=v._w.cells.size+'|'+v._w.S+'|';g.children.forEach(c=>{if(c!==rg){c.visible=false;if(c.isInstancedMesh)s+=c.count+':'+c.instanceMatrix.version+','}});
- if(s!==sig&&performance.now()-lastB>120){sig=s;lastB=performance.now();build(v,g)}}catch(e){console.error('RealLife',e)}}
-function set(v){on=!!v;try{localStorage.setItem(KEY,on?'1':'0')}catch(e){}sig='';lastBtn='';const V=vb();
- if(!on&&V){const g=V._t.env.scene.getObjectByName('VoxelBuild');if(g){g.children.forEach(c=>{if(c!==rg)c.visible=true});if(rg){for(let i=rg.children.length-1;i>=0;i--){const c=rg.children[i];rg.remove(c);if(c.dispose)c.dispose()}}}V._t.env.requestRender()}
- if(V)V._t.env.toast(on?'\u{1F30D} Real-Life Mode ON \u2014 ab har block asli cheez ban kar lagega (collision bhi asli)':'\u{1F9F1} Real-Life Mode OFF \u2014 Minecraft blocks wapas',2600)}
+function ui(){const open=!!(window.ForgeTerrainGame&&window.ForgeTerrainGame.isOpen&&window.ForgeTerrainGame.isOpen());
+ if(!b2){b2=document.createElement('div');b2.style.cssText='position:fixed;left:8px;top:40%;z-index:100000;width:46px;height:46px;border-radius:50%;align-items:center;justify-content:center;font-size:22px;background:rgba(20,24,40,.85);color:#fff;border:2px solid #4a5bff;touch-action:manipulation;user-select:none;-webkit-user-select:none';b2.textContent='\u2728';b2.onpointerdown=e=>{e.stopPropagation();e.preventDefault();panel()};document.body.appendChild(b2)}
+ b2.style.display=open?'flex':'none'}
+setInterval(ui,400);
 
 // ---------- TEXTURE ENHANCER v2: real image-enhance — sharpen (unsharp) + clarity (local contrast) + vibrance + fine grain, bump rebuilt from luminance; strength 0..300% ----------
 /* ===== PRO ENHANCER ENGINE ===== */
@@ -39319,7 +39167,7 @@ const ProEnh = (function () {
     const r2 = Math.max(4, Math.round(sc * 6)), base2 = guided(L, w, h, r2, 22 * 22);
     const Kd = .9 + .75 * lv, Kc = .20 * lv, T = 3.5, mn = new Float32Array(n), mx = new Float32Array(n);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let lo = 1e9, hi = -1e9; for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const v = L[clamp(y + j, 0, h - 1) * w + clamp(x + i, 0, w - 1)]; if (v < lo) lo = v; if (v > hi) hi = v; } mn[y * w + x] = lo; mx[y * w + x] = hi; }
-    const Ln = new Float32Array(n), V = 1 + .12 * lv, GR = 3.2 * lv;
+    const Ln = new Float32Array(n), V = 1 + .12 * lv, GR = 0 /* no added grain: only the texture's own detail is sharpened */;
     for (let i = 0; i < n; i++) {
       const d = L[i] - base1[i], ad = Math.abs(d), gain = 1 + Kd * ad / (ad + T);   // small |d| (noise) -> ~1, strong detail -> boosted
       let v = base1[i] + d * gain + Kc * (base1[i] - base2[i]);
@@ -39378,13 +39226,14 @@ function enhPix(d,N,lv){const n=N*N,L=new Float32Array(n);
   const dl=A*(L[i]-s[i])+K*(L[i]-l[i]),g=(r()-.5)*2*G*(.45+L[i]/255*.8),nl=L[i]+dl+g;
   d[j]=nl+(d[j]+dl+g-nl)*V;d[j+1]=nl+(d[j+1]+dl+g-nl)*V;d[j+2]=nl+(d[j+2]+dl+g-nl)*V;H[i]=nl}
  return blurW(H,N,N,1)}
-let enhBusy=false;
-function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv&&e.t)return e;if(e&&e.pend&&e.lv===lv)return null;if(enhBusy)return null;
+let enhBusy=false;const FLAT=new WeakMap();
+function enhTex(src,lv){if(FLAT.get(src))return{flat:true};const e=EC.get(src);if(e&&e.lv===lv&&e.t)return e;if(e&&e.pend&&e.lv===lv)return null;if(enhBusy)return null;
  const im0=src.image;if(!im0)return null;const sw=im0.width||im0.naturalWidth||256,sh=im0.height||im0.naturalHeight||256;
  let N=1;while(N<Math.max(sw,sh))N<<=1;N=Math.max(256,Math.min(512,N));
  const c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
  try{g.drawImage(im0,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
  let alpha=false;for(let i=3;i<im.data.length;i+=4)if(im.data[i]<250){alpha=true;break}
+  {let sm=0,sq=0,cn=0;for(let i=0;i<im.data.length;i+=16){if(im.data[i+3]<10)continue;const y=.299*im.data[i]+.587*im.data[i+1]+.114*im.data[i+2];sm+=y;sq+=y*y;cn++}const sd=cn?Math.sqrt(Math.max(0,sq/cn-(sm/cn)*(sm/cn))):0;if(sd<5){FLAT.set(src,1);return{flat:true}}}
  const rec={lv,pend:true,old:e&&e.t?e:null};EC.set(src,rec);ECS.add(rec);enhBusy=true;
  try{ProEnh.run(im,{scale:N<=256?2:1,lv,wrap:true,wantL:true,keepAlpha:alpha,async:true},(cv,Lo)=>{
   const ow=cv.width,M2=Math.min(256,ow>>1),bc=document.createElement('canvas');bc.width=bc.height=M2;const bg=bc.getContext('2d'),bi=bg.createImageData(M2,M2);
@@ -39392,15 +39241,34 @@ function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv&&e.t)return e;if(e&&
   const mk=(cv2,enc)=>{const t=new T.CanvasTexture(cv2);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=enc;t.anisotropy=4;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;return t};
   if(rec.dead){enhBusy=false;return}rec.t=mk(cv,src.encoding);rec.b=mk(bc,T.LinearEncoding);rec.pend=false;if(rec.old){rec.old.t.dispose();rec.old.b.dispose();rec.old=null}enhBusy=false})}catch(x){enhBusy=false;EC.delete(src);console.error('ProEnh',x)}
  return null}
-function eMat(m,lv){const u=m.userData;if(!u.o){if(!m.map)return false;u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale}}
- const k=lv.toFixed(2);if(u.eh===k)return false;u.eh=k;
- if(lv<=0){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs}
- else{const e=enhTex(u.o.map,lv);if(!e){u.eh=null;return false}m.map=e.t;
-  if(u.o.bump){m.bumpMap=e.b;m.bumpScale=u.o.bs*lv}else if(!m.normalMap){m.bumpMap=e.b;m.bumpScale=.8*lv}}
+// the block's OWN normal map (professional relief) -> sharpened only: X/Y slopes get an unsharp boost, then the vector is re-normalised. Nothing new is invented.
+let NC=new WeakMap();const NCS=new Set();
+function enhNormal(src,lv){const c=NC.get(src);if(c&&c.lv===lv)return c;
+ try{const im0=src.image;if(!im0)return null;const sw=im0.width||im0.naturalWidth||256,sh=im0.height||im0.naturalHeight||256;
+  let N=1;while(N<Math.max(sw,sh))N<<=1;N=Math.max(128,Math.min(512,N));
+  const cv=document.createElement('canvas');cv.width=cv.height=N;const g=cv.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';g.drawImage(im0,0,0,N,N);
+  const im=g.getImageData(0,0,N,N),d=im.data,n=N*N,X=new Float32Array(n),Y=new Float32Array(n);
+  for(let i=0;i<n;i++){X[i]=d[i*4]/127.5-1;Y[i]=d[i*4+1]/127.5-1}
+  const r=Math.max(1,Math.round(N/128)),bx=blurW(X,N,N,r),by=blurW(Y,N,N,r),A=Math.min(1.6,.5*lv);
+  for(let i=0;i<n;i++){let x=X[i]+A*(X[i]-bx[i]),y=Y[i]+A*(Y[i]-by[i]);const l=Math.hypot(x,y);if(l>.98){x*=.98/l;y*=.98/l}const z=Math.sqrt(Math.max(0,1-x*x-y*y));
+   d[i*4]=(x*.5+.5)*255;d[i*4+1]=(y*.5+.5)*255;d[i*4+2]=(z*.5+.5)*255;d[i*4+3]=255}
+  g.putImageData(im,0,0);const t=new T.CanvasTexture(cv);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=T.LinearEncoding;t.anisotropy=4;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;
+  if(c&&c.t){try{c.t.dispose();NCS.delete(c.t)}catch(e){}}
+  const rec={lv,t};NC.set(src,rec);NCS.add(t);return rec}catch(x){console.error('enhNormal',x);return null}}
+function eMat(m,lv){const u=m.userData;if(!u.o){if(!m.map)return false;u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale,nrm:m.normalMap}}
+ const k=lv.toFixed(2);if(u.eh===k)return false;u.eh=k;const o=u.o;
+ if(lv<=0){m.map=o.map;m.bumpMap=o.bump;m.bumpScale=o.bs;m.normalMap=o.nrm}
+ else{const e=enhTex(o.map,lv);if(!e){u.eh=null;return false}
+  let eb=null;if(o.bump){eb=enhTex(o.bump,lv);if(!eb){u.eh=null;return false}}
+  const en=o.nrm?enhNormal(o.nrm,lv):null;
+  m.map=e.flat?o.map:e.t;                                   // colour texture: sharpened (flat colours left alone)
+  if(o.bump)m.bumpMap=(eb&&!eb.flat)?eb.t:o.bump;            // the block's OWN relief, sharpened - same shape, crisper
+  if(o.nrm)m.normalMap=en?en.t:o.nrm;                        // same for its own normal map
+  /* bumpScale untouched: no extra depth is ever added */}
  m.needsUpdate=true;return true}
 // one worker for both modes: Real-Life ON -> its procedural materials, OFF -> the normal Minecraft blocks. Time-boxed so the slider never freezes the phone.
 function enhTick(){try{const v=vb();if(!v)return;const t0=performance.now(),list=[];
- if(on)Object.keys(MT).forEach(k=>list.push(MT[k]));else{const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))})}
+ {const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{[].concat(c.material||[]).forEach(m=>list.push(m))})}
  const k=enh.toFixed(2);let ch=0;for(const m of list){if(m.userData.eh===k)continue;if(eMat(m,enh))ch=1;if(performance.now()-t0>12)break}
  if(ch)v._t.env.requestRender()}catch(e){}}
 function setEnh(v){enh=v;try{localStorage.setItem('forgeTexEnh',String(v))}catch(e){}const V=vb();if(V){enhTick();V._t.env.requestRender();V._t.env.toast('✨ Texture Enhance: '+Math.round(v*100)+'%',1400)}}
@@ -39444,36 +39312,38 @@ function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}
  p.querySelectorAll('.rb').forEach(b=>b.onpointerdown=()=>{S.value=b.dataset.v;V.textContent=S.value+'%';setEnh(S.value/100)});
  p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlP').onpointerdown=()=>{p.remove();photoUp()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
 // forget every enhanced copy + restore the originals: needed whenever the underlying textures change (texture pack applied / cleared)
-function resetEnh(){try{ECS.forEach(r=>{r.dead=true;try{r.t&&r.t.dispose();r.b&&r.b.dispose()}catch(e){}});ECS.clear();EC=new WeakMap();enhBusy=false;
- const v=vb();if(!v)return;const list=[];Object.keys(MT).forEach(k=>list.push(MT[k]));const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))});
- list.forEach(m=>{const u=m.userData;if(u&&u.o){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;delete u.o;m.needsUpdate=true}if(u)u.eh=null});v._t.env.requestRender()}catch(e){console.error('resetEnh',e)}}
-window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:resetEnh};loop();
+function resetEnh(){try{ECS.forEach(r=>{r.dead=true;try{r.t&&r.t.dispose();r.b&&r.b.dispose()}catch(e){}});ECS.clear();EC=new WeakMap();enhBusy=false;NCS.forEach(t=>{try{t.dispose()}catch(e){}});NCS.clear();NC=new WeakMap();
+ const v=vb();if(!v)return;const list=[];const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))});
+ list.forEach(m=>{const u=m.userData;if(u&&u.o){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;if('nrm' in u.o)m.normalMap=u.o.nrm;delete u.o;m.needsUpdate=true}if(u)u.eh=null});v._t.env.requestRender()}catch(e){console.error('resetEnh',e)}}
+window.RealLife={on:()=>false,set:()=>{},panel,photo:photoUp,enh:()=>enh,setEnh,reset:resetEnh};
 })();
 </script>
 <script>
-/* ===== INTERNET REMINDER =====
-   Neutral wording (online features / sync). Real reachability check (not just navigator.onLine, which stays true on
-   Wi-Fi with no internet).
-   • No network at all (Wi-Fi off + mobile data off): popup comes back every 1 minute until internet is on.
-   • Connected to Wi-Fi but that Wi-Fi has no internet: shown once, then only a gentle reminder every 15 minutes.
-   • Internet comes back: popup disappears by itself and the banner ad is retried. */
+/* ===== INTERNET REMINDER (gentle) =====
+   Goal: user ko kabhi tang nahi karna. Ek chhota friendly card, apne aap 8 sec mein hat jata hai.
+   • Internet band: pehli baar dikhta hai, phir sirf 15 min baad (agar ab bhi band ho). User "Baad mein" / ✕ dabaye to 30 min chup.
+   • "Aaj nahi" dabaye to 24 ghante tak kuch nahi dikhta.
+   • Wi-Fi connected par internet nahi: poore session mein sirf ek baar, kabhi repeat nahi.
+   • Internet wapas aate hi card hat jata hai aur banner ad dobara try hota hai.
+   Real reachability check hota hai (navigator.onLine Wi-Fi-bina-internet pe galat hota hai). */
 (function () {
-  var KEY = 'forgeNetNotice',
-      AGAIN_NONET = 60 * 1000,        // no network at all -> every 1 minute
-      AGAIN_WIFI_DEAD = 15 * 60 * 1000, // Wi-Fi connected but no internet -> rarely
-      CHECK_EVERY = 10 * 1000, PROBE_MS = 4000,
-      box = null, nextShowAt = 0, state = 'unknown', busy = false, lastWifiShown = 0;
+  var KEY = 'forgeNetNotice', SNOOZE_KEY = 'forgeNetSnoozeUntil',
+      AGAIN_NONET = 15 * 60 * 1000, AFTER_DISMISS = 30 * 60 * 1000, TODAY_OFF = 24 * 60 * 60 * 1000,
+      AUTO_HIDE = 8000, CHECK_EVERY = 15 * 1000, PROBE_MS = 4000,
+      box = null, hideT = 0, nextShowAt = 0, state = 'unknown', busy = false, wifiShown = false;
   var PROBE_URL = 'https://www.gstatic.com/generate_204';
 
   function enabled() { try { return localStorage.getItem(KEY) !== '0'; } catch (e) { return true; } }
-  function linkType() { // 'wifi' | 'cellular' | 'none' | 'unknown'
+  function snoozed() { try { return Date.now() < +(localStorage.getItem(SNOOZE_KEY) || 0); } catch (e) { return false; } }
+  function snoozeFor(ms) { try { localStorage.setItem(SNOOZE_KEY, String(Date.now() + ms)); } catch (e) { } }
+  function linkType() {
     try {
       var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
       if (c && c.type) { if (c.type === 'wifi' || c.type === 'ethernet') return 'wifi'; if (c.type === 'cellular') return 'cellular'; if (c.type === 'none') return 'none'; }
     } catch (e) { }
     return 'unknown';
   }
-  function probe() { // resolves true only if the internet really answers
+  function probe() {
     if (navigator.onLine === false) return Promise.resolve(false);
     return new Promise(function (res) {
       var done = false, ac = window.AbortController ? new AbortController() : null;
@@ -39483,25 +39353,31 @@ window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:rese
         .catch(function () { if (!done) { done = true; clearTimeout(t); res(false); } });
     });
   }
-  function hide() { if (box) { box.remove(); box = null; } }
-  function closeIt() { hide(); nextShowAt = Date.now() + (state === 'wifi-dead' ? AGAIN_WIFI_DEAD : AGAIN_NONET); }
+  function hide() { clearTimeout(hideT); if (box) { box.remove(); box = null; } }
+  function btn(label, strong, fn) {
+    var b = document.createElement('div'); b.textContent = label;
+    b.style.cssText = 'padding:7px 12px;border-radius:8px;font-size:12px;touch-action:manipulation;' + (strong ? 'background:#4a5bff;color:#fff;font-weight:600' : 'background:#2a3150;color:#cfd6ff');
+    b.addEventListener('click', function (e) { e.stopPropagation(); fn(); }); return b;
+  }
   function show(kind) {
-    if (box || !enabled()) return;
+    if (box || !enabled() || snoozed()) return;
     box = document.createElement('div');
-    box.setAttribute('role', 'alert');
-    box.style.cssText = 'position:fixed;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));z-index:2147483000;background:#1d2440;color:#fff;border:1px solid #4a5bff;border-radius:12px;padding:12px 14px;font:13px/1.4 system-ui,sans-serif;display:flex;gap:10px;align-items:center;box-shadow:0 6px 20px rgba(0,0,0,.5)';
-    var t = document.createElement('div'); t.style.flex = '1';
+    box.setAttribute('role', 'status');
+    box.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));z-index:2147483000;background:#1d2440;color:#fff;border:1px solid #3a4aa8;border-radius:14px;padding:12px 14px;font:13px/1.45 system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.45);opacity:0;transform:translateY(-8px);transition:opacity .25s,transform .25s';
+    var t = document.createElement('div');
     t.innerHTML = kind === 'wifi-dead'
-      ? '<b>📶 Wi-Fi mein internet nahi aa raha</b><br>Library aur online features ke liye working internet chahiye. Mobile data on kar sakte ho.'
-      : '<b>📶 Internet connection chahiye</b><br>Library, sync aur online features ke liye internet on rakho.';
-    var x = document.createElement('div'); x.textContent = '✕';
-    x.style.cssText = 'padding:6px 12px;font-size:18px;border-radius:8px;background:#2a3150;touch-action:manipulation';
-    x.addEventListener('click', function (e) { e.stopPropagation(); closeIt(); });
-    box.appendChild(t); box.appendChild(x); document.body.appendChild(box);
+      ? '<b>📶 Is Wi-Fi mein internet nahi aa raha</b><br>Chaho to mobile data on kar lo — online features aur chhote ads (jo app ko free rakhte hain) wahi se chalte hain. 🙏'
+      : '<b>📶 Internet on kar loge?</b><br>Library aur online features ke liye ye zaroori hai. Ye app free hai — internet se chalne wale chhote ads isse free rakhne mein madad karte hain. Shukriya! 🙏';
+    var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:10px';
+    row.appendChild(btn('Aaj nahi', false, function () { snoozeFor(TODAY_OFF); hide(); }));
+    row.appendChild(btn('Baad mein', true, function () { snoozeFor(AFTER_DISMISS); nextShowAt = Date.now() + AFTER_DISMISS; hide(); }));
+    box.appendChild(t); box.appendChild(row); document.body.appendChild(box);
+    requestAnimationFrame(function () { if (box) { box.style.opacity = '1'; box.style.transform = 'none'; } });
+    hideT = setTimeout(function () { nextShowAt = Date.now() + AGAIN_NONET; hide(); }, AUTO_HIDE);
   }
   function onBackOnline() {
-    var wasShowing = !!box; hide(); nextShowAt = 0;
-    if (wasShowing) { try { window.toast && window.toast('📶 Internet wapas aa gaya', 1500); } catch (e) { } }
+    var was = !!box; hide(); nextShowAt = 0;
+    if (was) { try { window.toast && window.toast('📶 Internet wapas aa gaya', 1500); } catch (e) { } }
     try { window.__forgeRetryAds && window.__forgeRetryAds(); } catch (e) { }
   }
   function check() {
@@ -39511,18 +39387,15 @@ window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:rese
       var prev = state;
       if (ok) { state = 'online'; if (prev !== 'online') onBackOnline(); return; }
       state = linkType() === 'wifi' ? 'wifi-dead' : 'no-net';
-      if (prev !== state) { hide(); if (state === 'no-net') nextShowAt = 0; }
-      var now = Date.now();
-      if (box || now < nextShowAt) return;
-      if (state === 'wifi-dead') { if (lastWifiShown && now - lastWifiShown < AGAIN_WIFI_DEAD) return; lastWifiShown = now; }
+      if (box || Date.now() < nextShowAt) return;
+      if (state === 'wifi-dead') { if (wifiShown) return; wifiShown = true; nextShowAt = Date.now() + AGAIN_NONET; }
       show(state);
     });
   }
-  window.addEventListener('offline', function () { setTimeout(check, 300); });
   window.addEventListener('online', function () { setTimeout(check, 500); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
   setInterval(check, CHECK_EVERY);
-  setTimeout(check, 2500);
+  setTimeout(check, 4000);
   window.ForgeNetNotice = { enable: function (v) { try { localStorage.setItem(KEY, v ? '1' : '0'); } catch (e) { } if (!v) hide(); else check(); }, enabled: enabled, check: check };
 })();
 </script>
