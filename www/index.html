@@ -33574,7 +33574,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       }
       return { ok, total: keys.length, miss, res, used };
     }
-    function tpRefresh() { try { W.defs.forEach(d => dropDefGfx(d)); geoS = 0; rebuild(); refreshTab(); requestRender(); } catch (e) { } }
+    function tpRefresh() { try { W.defs.forEach(d => dropDefGfx(d)); geoS = 0; try { window.RealLife && window.RealLife.reset(); } catch (e) { } rebuild(); refreshTab(); requestRender(); } catch (e) { console.error('tpRefresh', e); } }
     const tpIdb = (mode, fn) => new Promise((res, rej) => { try { const r = indexedDB.open('forge_mc_texpack', 1); r.onupgradeneeded = () => r.result.createObjectStore('p'); r.onerror = () => rej(r.error); r.onsuccess = () => { const db = r.result, tx = db.transaction('p', mode); let q; try { q = fn(tx.objectStore('p')); } catch (e) { db.close(); rej(e); return; } tx.oncomplete = () => { db.close(); res(q && q.result); }; tx.onerror = tx.onabort = () => { db.close(); rej(tx.error); }; }; } catch (e) { rej(e); } });
     async function tpSave() { if (!TP_USER) return; try { await tpIdb('readwrite', st => st.put({ name: TP_USER.name, ver: TP_USER.ver, legacy: TP_USER.legacy, files: TP_USER.files }, 'cur')); } catch (e) { toast('Pack save nahi ho paya (is browser mein storage band hai) — is session mein chalega', 3500); } }
     async function tpRestoreSaved() {
@@ -33606,17 +33606,17 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const cap = tpCap(), rep = await tpApplyFiles(files, cap);
       if (!rep.ok) { await tpApplyFiles({}, cap); throw new Error('Pack mila lekin koi texture is app ke block se match nahi hua. Naam check karo (jaise stone.png, oak_planks.png).'); }
       TP_USER = { name: name || 'Texture pack', ver: tpFmtLabel(fmt), legacy, files: rep.used, ok: rep.ok, total: rep.total, miss: rep.miss, res: rep.res };
-      await tpSave(); tpRefresh(); toast('✅ ' + TP_USER.name + ' lag gaya — ' + rep.ok + '/' + rep.total + ' textures', 3200);
+      await tpSave(); tpRefresh(); try { window.RealLife && window.RealLife.reset(); } catch (e) { } setTimeout(() => { try { tpRefresh(); window.RealLife && window.RealLife.reset(); } catch (e) { } }, 400); toast('✅ ' + TP_USER.name + ' lag gaya — ' + rep.ok + '/' + rep.total + ' textures', 3200);
     }
     async function tpReapply() { if (!TP_USER) return; const rep = await tpApplyFiles(TP_USER.files, tpCap()); TP_USER.ok = rep.ok; TP_USER.miss = rep.miss; TP_USER.res = rep.res; tpRefresh(); }
     async function tpClear() {
       if (!TP_DEF_CV) return; Object.keys(TP_DEF_CV).forEach(k => { TP_CV[k] = TP_DEF_CV[k]; if (TP_DEF_N[k]) TP_NCV[k] = TP_DEF_N[k]; else delete TP_NCV[k]; });
-      TP_USER = null; try { await tpIdb('readwrite', st => st.delete('cur')); } catch (e) { } tpRefresh(); toast('Restore Default Textures', 1600);
+      TP_USER = null; try { await tpIdb('readwrite', st => st.delete('cur')); } catch (e) { } tpRefresh(); try { window.RealLife && window.RealLife.reset(); } catch (e) { } toast('Restore Default Textures', 1600);
     }
     function tpPick() {
       const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.accept = '.zip,.png,application/zip,application/x-zip-compressed,application/octet-stream,image/png';
       i.onchange = () => { const fl = Array.from(i.files || []); if (fl.length) tpImport(fl).catch(e => toast('Texture pack error: ' + (e && e.message || e), 5000)); };
-      i.click();
+      i.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'; document.body.appendChild(i); i.click(); setTimeout(() => { try { i.remove(); } catch (e) { } }, 60000);
     }
     function texPackUI() {
       section('🎨 Minecraft Texture Pack (Java Edition)'); const u = TP_USER;
@@ -38403,15 +38403,15 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const h = E.size() / 2; return [-h, h, -h, h];
     }
     function open() {
-      if (G) return; if (E.workspace() !== 'terrain') return; const S = T.ensureS(); const gi0 = T.gridInfo();
+      if (G) return; if (E.workspace() !== 'terrain') { E.toast('Pehle Terrain / Build tab kholo, phir 🎮 dabao', 2200); return; } const S = T.ensureS(); const gi0 = T.gridInfo();
       let xa, xb, za, zb; if (gi0) { xa = Math.min(gi0.x0, gi0.x0 + gi0.dx * (gi0.s1 - 1)); xb = Math.max(gi0.x0, gi0.x0 + gi0.dx * (gi0.s1 - 1)); za = Math.min(gi0.z0, gi0.z0 + gi0.dz * (gi0.s1 - 1)); zb = Math.max(gi0.z0, gi0.z0 + gi0.dz * (gi0.s1 - 1)); } else { const fb = fbBounds(); xa = fb[0]; xb = fb[1]; za = fb[2]; zb = fb[3]; }
       const sc = E.scene, rr = E.renderer;
       const ov = el('div', 'position:fixed;inset:0;z-index:99999;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;font-family:system-ui,sans-serif;color:#fff;overflow:hidden'), cv = el('canvas', 'position:absolute;inset:0;width:100%;height:100%;display:block'); ov.appendChild(cv);
-      let R; try { R = new THREE.WebGLRenderer({ canvas: cv, antialias: true, powerPreference: 'high-performance' }); } catch (e) { E.toast('Game graphics start nahi hue: ' + e.message, 3500); return; }
+      let R; try { R = new THREE.WebGLRenderer({ canvas: cv, antialias: true, powerPreference: 'high-performance' }); } catch (e) { try { ov.remove(); } catch (x) { } throw new Error('Game graphics start nahi hue: ' + e.message); }
       try { R.outputEncoding = rr.outputEncoding; R.toneMapping = rr.toneMapping; R.toneMappingExposure = rr.toneMappingExposure; R.shadowMap.enabled = rr.shadowMap.enabled; R.shadowMap.type = rr.shadowMap.type; } catch (e) { }
       R.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       const cam = new THREE.PerspectiveCamera(72, 1, 0.05, 800);
-      const st = { x: (xa + xb) / 2, z: (za + zb) / 2, fy: 0, vy: 0, yaw: 0, pitch: -0.15, face: 0, tp: true, dist: 3, walk: 0, ground: false, joy: { x: 0, y: 0 }, keys: {}, hist: [], fut: [], aimC: null, aimT: 0, last: performance.now(), raf: 0, menu: false, inv: false, rep: 0 };
+      const st = { x: (xa + xb) / 2, z: (za + zb) / 2, fy: 0, vy: 0, yaw: 0, pitch: -0.15, face: 0, tp: false, dist: 3, walk: 0, ground: false, joy: { x: 0, y: 0 }, keys: {}, hist: [], fut: [], aimC: null, aimT: 0, last: performance.now(), raf: 0, menu: false, inv: false, rep: 0 };
       let STEP = 0.32, BSTEP = Math.min(0.32, S * 0.55), HEAD = 1.7, RAD = 0.26, JH = Math.max(1.15, S * 1.2), JV = 0; const REACH = Math.max(6, S * 8), GRAV = 15;
       const GSTEP = Math.max(0.32, Math.min(S * 1.05, 0.9)); let _bt = 0;
       const refreshB = () => { const n = performance.now(); if (n - _bt < 250) return; _bt = n; const g = T.gridInfo(); if (g) { xa = Math.min(g.x0, g.x0 + g.dx * (g.s1 - 1)); xb = Math.max(g.x0, g.x0 + g.dx * (g.s1 - 1)); za = Math.min(g.z0, g.z0 + g.dz * (g.s1 - 1)); zb = Math.max(g.z0, g.z0 + g.dz * (g.s1 - 1)); } else { const fb = fbBounds(); xa = fb[0]; xb = fb[1]; za = fb[2]; zb = fb[3]; } };
@@ -38901,7 +38901,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       const kd = e => { if (st.menu || st.inv) return; st.keys[e.code] = true; if (e.code === 'Space') { e.preventDefault(); if (st.ground) { st.vy = JV; st.ground = false; } } if (e.code === 'KeyE') openInv(); if (e.code === 'KeyF') doPlace(); if (e.code === 'KeyR') doBreak(); if (/^Digit[1-9]$/.test(e.code)) { W.slot = +e.code.slice(5) - 1; useSlot(); drawHot(); } if (e.code === 'Escape') openMenu(); }, ku = e => { st.keys[e.code] = false; };
       window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
       const onRes = () => { const w = innerWidth, h = innerHeight; R.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); drawHot(); }; window.addEventListener('resize', onRes);
-      document.body.appendChild(ov); onRes(); E.toast('🎮 Terrain Game — joystick se chalo, drag se dekho, ➕ rakho, ⛏ todo', 2600);
+      ov.setAttribute('data-forge-tg', '1'); document.body.appendChild(ov); onRes(); E.toast('🎮 Terrain Game — joystick se chalo, drag se dekho, ➕ rakho, ⛏ todo', 2600);
       // ---- main loop ----
       function frame(now) {
         st.raf = requestAnimationFrame(frame); const dt = Math.min(0.05, (now - st.last) / 1000); st.last = now;
@@ -38925,9 +38925,19 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
         try { sc.remove(pgh); sc.remove(ring); sc.remove(aBox); sc.remove(aFill); aBox.geometry.dispose(); aFill.geometry.dispose(); if (selBox) sc.remove(selBox); closeEd(); sc.remove(av); sc.remove(gh); gh.geometry.dispose(); av.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); } catch (e) { }
         try { persist(); } catch (e) { } try { R.dispose(); R.forceContextLoss && R.forceContextLoss(); } catch (e) { } ov.remove(); status = null; G = null; try { E.requestRender(); } catch (e) { } E.toast('✅ Map save ho gaya — sab kuch waisa hi hai jaisa banaya', 2200);
       }
-      G = { close, st };
+      G = { close, st, ov };
     }
-    window.ForgeTerrainGame = { open, close: () => G && G.close(), isOpen: () => !!G, noAuto: false, _boot: boot };
+    // Safe entry point: after an Exit the game could refuse to start again (half-closed leftovers / a failed first try). Every entry now
+    // wipes stale overlays, resets state, tells you the real error if one happens, and retries once automatically.
+    function staleClean() { try { document.querySelectorAll('[data-forge-tg]').forEach(n => { if (!G || !G.ov || G.ov !== n) n.remove(); }); } catch (e) { } if (G && G.ov && !G.ov.isConnected) { G = null; } }
+    function openSafe(retry) {
+      if (G && G.ov && G.ov.isConnected) return; staleClean(); if (G && !(G.ov && G.ov.isConnected)) G = null;
+      try { open(); } catch (e) {
+        console.error('Terrain Game open failed', e); G = null; staleClean();
+        if (!retry) setTimeout(() => openSafe(true), 250); else E.toast('Game start nahi hua: ' + (e && e.message || e) + ' — app band karke dobara kholo', 5000);
+      }
+    }
+    window.ForgeTerrainGame = { open: () => openSafe(false), close: () => G && G.close(), isOpen: () => !!G, noAuto: false, _boot: boot };
   })(); } catch (tgErr) { try { console.error('Terrain Game init failed:', tgErr); } catch (e2) { } }
 };
 </script>
@@ -39309,7 +39319,7 @@ const ProEnh = (function () {
 })();
 
 window.ProEnh=ProEnh;
-const EC=new WeakMap();
+let EC=new WeakMap();const ECS=new Set();
 // tileable (wrap-around) box blur x3 ~ gaussian, on a Float32Array channel — wrap so tiled blocks show no seams
 function blurW(a,w,h,r){const o=new Float32Array(a),t=new Float32Array(a.length),k=1/(2*r+1);
  for(let p=0;p<3;p++){
@@ -39332,12 +39342,12 @@ function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv&&e.t)return e;if(e&&
  const c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
  try{g.drawImage(im0,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
  let alpha=false;for(let i=3;i<im.data.length;i+=4)if(im.data[i]<250){alpha=true;break}
- const rec={lv,pend:true,old:e&&e.t?e:null};EC.set(src,rec);enhBusy=true;
+ const rec={lv,pend:true,old:e&&e.t?e:null};EC.set(src,rec);ECS.add(rec);enhBusy=true;
  try{ProEnh.run(im,{scale:N<=256?2:1,lv,wrap:true,wantL:true,keepAlpha:alpha,async:true},(cv,Lo)=>{
   const ow=cv.width,M2=ow>>1,bc=document.createElement('canvas');bc.width=bc.height=M2;const bg=bc.getContext('2d'),bi=bg.createImageData(M2,M2);
   for(let y=0;y<M2;y++)for(let x=0;x<M2;x++){const v=Lo[(y*2)*ow+x*2],q=(y*M2+x)*4;bi.data[q]=bi.data[q+1]=bi.data[q+2]=v;bi.data[q+3]=255}bg.putImageData(bi,0,0);
   const mk=(cv2,enc)=>{const t=new T.CanvasTexture(cv2);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=enc;t.anisotropy=8;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;return t};
-  rec.t=mk(cv,src.encoding);rec.b=mk(bc,T.LinearEncoding);rec.pend=false;if(rec.old){rec.old.t.dispose();rec.old.b.dispose();rec.old=null}enhBusy=false})}catch(x){enhBusy=false;EC.delete(src);console.error('ProEnh',x)}
+  if(rec.dead){enhBusy=false;return}rec.t=mk(cv,src.encoding);rec.b=mk(bc,T.LinearEncoding);rec.pend=false;if(rec.old){rec.old.t.dispose();rec.old.b.dispose();rec.old=null}enhBusy=false})}catch(x){enhBusy=false;EC.delete(src);console.error('ProEnh',x)}
  return null}
 function eMat(m,lv){const u=m.userData;if(!u.o){if(!m.map)return false;u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale}}
  const k=lv.toFixed(2);if(u.eh===k)return false;u.eh=k;
@@ -39390,7 +39400,18 @@ function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}
  let tm=0;S.oninput=()=>{V.textContent=S.value+'%';clearTimeout(tm);tm=setTimeout(()=>setEnh(S.value/100),150)};S.onchange=()=>{clearTimeout(tm);setEnh(S.value/100)};
  p.querySelectorAll('.rb').forEach(b=>b.onpointerdown=()=>{S.value=b.dataset.v;V.textContent=S.value+'%';setEnh(S.value/100)});
  p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlP').onpointerdown=()=>{p.remove();photoUp()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
-window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh};loop();
+// forget every enhanced copy + restore the originals: needed whenever the underlying textures change (texture pack applied / cleared)
+function resetEnh(){try{ECS.forEach(r=>{r.dead=true;try{r.t&&r.t.dispose();r.b&&r.b.dispose()}catch(e){}});ECS.clear();EC=new WeakMap();enhBusy=false;
+ const v=vb();if(!v)return;const list=[];Object.keys(MT).forEach(k=>list.push(MT[k]));const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))});
+ list.forEach(m=>{const u=m.userData;if(u&&u.o){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;delete u.o;m.needsUpdate=true}if(u)u.eh=null});v._t.env.requestRender()}catch(e){console.error('resetEnh',e)}}
+// always-available PLAY button: shows in the Build tab whenever the game is closed, so you can always get back in after Exit
+setInterval(()=>{try{const V=vb(),T=window.ForgeTerrainGame;let b=document.getElementById('forgePlayBtn');
+ const show=!!(V&&T&&V._w&&V._w.show&&V._t.env.workspace()==='terrain'&&!T.isOpen());
+ if(!show){if(b)b.style.display='none';return}
+ if(!b){b=document.createElement('div');b.id='forgePlayBtn';b.textContent='\u{1F3AE} Play';b.style.cssText='position:fixed;right:12px;bottom:calc(210px + env(safe-area-inset-bottom));z-index:99990;padding:12px 18px;border-radius:26px;background:#1f9d55;color:#fff;font:700 15px system-ui;box-shadow:0 3px 12px rgba(0,0,0,.5);touch-action:manipulation';
+  b.onpointerdown=e=>{e.stopPropagation();e.preventDefault();try{T.open()}catch(x){V._t.env.toast('Game error: '+x.message,3000)}};document.body.appendChild(b)}
+ b.style.display='block'}catch(e){}},700);
+window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:resetEnh};loop();
 })();
 </script>
 </body>
