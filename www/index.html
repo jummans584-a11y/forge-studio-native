@@ -18938,6 +18938,7 @@ if (gdM > 0.001) {
       return writeNext(true).then(() => path);
     });
   }
+  window.__saveDataUrl = (u, n) => downloadDataUrl(u, n);   // lets other tools (Photo Upscaler) save files to the device
   function downloadDataUrl(dataUrl, filename) {
     // Reports into the export progress window (exportUI) so every save shows what is happening and
     // ends in an unmistakable Saved / Failed state.
@@ -39194,6 +39195,120 @@ function set(v){on=!!v;try{localStorage.setItem(KEY,on?'1':'0')}catch(e){}sig=''
  if(V)V._t.env.toast(on?'\u{1F30D} Real-Life Mode ON \u2014 ab har block asli cheez ban kar lagega (collision bhi asli)':'\u{1F9F1} Real-Life Mode OFF \u2014 Minecraft blocks wapas',2600)}
 
 // ---------- TEXTURE ENHANCER v2: real image-enhance — sharpen (unsharp) + clarity (local contrast) + vibrance + fine grain, bump rebuilt from luminance; strength 0..300% ----------
+/* ===== PRO ENHANCER ENGINE ===== */
+// ===== FORGE PRO ENHANCER: free, offline, no model download. Lanczos-3 upscale + edge-aware (guided-filter) denoise/deblock
+// + halo-free detail & clarity boost + overshoot limiter + structure-aware micro-detail. Tile based so 4K output stays within phone memory.
+const ProEnh = (function () {
+  'use strict';
+  const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+  // running-sum box blur (clamped edges), radius r, in place on a (w*h)
+  function box(a, w, h, r) {
+    const t = new Float32Array(a.length), k = 1 / (2 * r + 1);
+    for (let y = 0; y < h; y++) { const b = y * w; let s = 0; for (let i = -r; i <= r; i++) s += a[b + clamp(i, 0, w - 1)];
+      for (let x = 0; x < w; x++) { t[b + x] = s * k; s += a[b + Math.min(w - 1, x + r + 1)] - a[b + Math.max(0, x - r)]; } }
+    for (let x = 0; x < w; x++) { let s = 0; for (let i = -r; i <= r; i++) s += t[clamp(i, 0, h - 1) * w + x];
+      for (let y = 0; y < h; y++) { a[y * w + x] = s * k; s += t[Math.min(h - 1, y + r + 1) * w + x] - t[Math.max(0, y - r) * w + x]; } }
+    return a;
+  }
+  // self-guided filter = edge-preserving smoothing: flat areas blur, real edges stay sharp (no halos)
+  function guided(L, w, h, r, eps) {
+    const n = L.length, m = box(Float32Array.from(L), w, h, r), L2 = new Float32Array(n);
+    for (let i = 0; i < n; i++) L2[i] = L[i] * L[i];
+    const v = box(L2, w, h, r), A = new Float32Array(n), Bc = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const va = Math.max(0, v[i] - m[i] * m[i]); const a = va / (va + eps); A[i] = a; Bc[i] = m[i] * (1 - a); }
+    box(A, w, h, r); box(Bc, w, h, r);
+    for (let i = 0; i < n; i++) L2[i] = A[i] * L[i] + Bc[i];
+    return L2;
+  }
+  // separable running min/max (radius r) for the shock-style edge steepening
+  function minmax(a, w, h, r, isMax) {
+    const t = new Float32Array(a.length), o = new Float32Array(a.length), f = isMax ? Math.max : Math.min, init = isMax ? -1e9 : 1e9;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = init; for (let i = -r; i <= r; i++) v = f(v, a[y * w + clamp(x + i, 0, w - 1)]); t[y * w + x] = v; }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = init; for (let j = -r; j <= r; j++) v = f(v, t[clamp(y + j, 0, h - 1) * w + x]); o[y * w + x] = v; }
+    return o;
+  }
+  const hash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  function lanczosW(n, scale, srcN, wrap, off) { // per output column: first src index + 6 weights
+    const idx = new Int32Array(n * 6), wt = new Float32Array(n * 6), fs = scale < 1 ? 1 / scale : 1;
+    for (let i = 0; i < n; i++) { const sx = (i + off + 0.5) / scale - 0.5, f = Math.floor(sx); let sum = 0;
+      for (let t = -2; t <= 3; t++) { const d = (sx - (f + t)) / fs, ad = Math.abs(d), wv = ad < 1e-6 ? 1 : ad >= 3 ? 0 : 3 * Math.sin(Math.PI * d) * Math.sin(Math.PI * d / 3) / (Math.PI * Math.PI * d * d);
+        let si = f + t; si = wrap ? ((si % srcN) + srcN) % srcN : clamp(si, 0, srcN - 1); idx[i * 6 + t + 2] = si; wt[i * 6 + t + 2] = wv; sum += wv; }
+      for (let t = 0; t < 6; t++) wt[i * 6 + t] /= sum; }
+    return { idx, wt };
+  }
+  // produce RGB planes (float 0..255) for output rectangle [ox,ox+tw) x [oy,oy+th) of the upscaled image
+  function sample(src, sw, sh, scale, wrap, ox, oy, tw, th) {
+    const cx = lanczosW(tw, scale, sw, wrap, ox), cy = lanczosW(th, scale, sh, wrap, oy);
+    const rows = new Map(), R = new Float32Array(tw * th), G = new Float32Array(tw * th), B = new Float32Array(tw * th);
+    const hrow = (sy) => { let r = rows.get(sy); if (r) return r; r = new Float32Array(tw * 3);
+      for (let x = 0; x < tw; x++) { let a = 0, b = 0, c = 0; for (let t = 0; t < 6; t++) { const p = (sy * sw + cx.idx[x * 6 + t]) * 4, wv = cx.wt[x * 6 + t]; a += src[p] * wv; b += src[p + 1] * wv; c += src[p + 2] * wv; } r[x * 3] = a; r[x * 3 + 1] = b; r[x * 3 + 2] = c; }
+      rows.set(sy, r); if (rows.size > 24) rows.delete(rows.keys().next().value); return r; };
+    for (let y = 0; y < th; y++) { for (let t = 0; t < 6; t++) { const wv = cy.wt[y * 6 + t], r = hrow(cy.idx[y * 6 + t]);
+        for (let x = 0; x < tw; x++) { const i = y * tw + x; R[i] += r[x * 3] * wv; G[i] += r[x * 3 + 1] * wv; B[i] += r[x * 3 + 2] * wv; } } }
+    return [R, G, B];
+  }
+  // lv: 0..3 (1 = normal). q = {den, det, clar, grain, vib}
+  function enhanceTile(P, w, h, lv, gx, gy, sc) {
+    const n = w * h, R = P[0], G = P[1], B = P[2], L = new Float32Array(n);
+    for (let i = 0; i < n; i++) L[i] = .299 * R[i] + .587 * G[i] + .114 * B[i];
+    // 1) chroma denoise (colour noise & JPEG blocks live here)
+    const cb = new Float32Array(n), cr = new Float32Array(n);
+    for (let i = 0; i < n; i++) { cb[i] = B[i] - L[i]; cr[i] = R[i] - L[i]; }
+    const rc = Math.max(1, Math.round(sc * 1.2)); box(cb, w, h, rc); box(cr, w, h, rc); box(cb, w, h, rc); box(cr, w, h, rc);
+    // 2) luma: edge-aware denoise, then boost the fine detail layer with a noise gate (real detail up, noise not)
+    // 1b) deblur / edge steepening: unsharp, then clamp to the local min..max so the soft ramps of an upscaled edge collapse into a crisp edge (no halos)
+    if (sc > 1 || lv > 0) {
+      const g = Float32Array.from(L); box(g, w, h, Math.max(1, Math.round(sc * .7))); box(g, w, h, Math.max(1, Math.round(sc * .7)));
+      const rho = Math.max(1, Math.round(sc * .9)), lo = minmax(L, w, h, rho, false), hi = minmax(L, w, h, rho, true), am = (sc > 1 ? 1.6 : .8) + .7 * lv;
+      for (let i = 0; i < n; i++) { const v = L[i] + am * (L[i] - g[i]); L[i] = v < lo[i] ? lo[i] + (v - lo[i]) * .15 : v > hi[i] ? hi[i] + (v - hi[i]) * .15 : v; }
+    }
+    const r1 = Math.max(1, Math.round(sc * 1.5)), base1 = guided(L, w, h, r1, Math.pow(5 + 3 * lv, 2));
+    const r2 = Math.max(4, Math.round(sc * 6)), base2 = guided(L, w, h, r2, 22 * 22);
+    const Kd = .9 + .75 * lv, Kc = .20 * lv, T = 3.5, mn = new Float32Array(n), mx = new Float32Array(n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let lo = 1e9, hi = -1e9; for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const v = L[clamp(y + j, 0, h - 1) * w + clamp(x + i, 0, w - 1)]; if (v < lo) lo = v; if (v > hi) hi = v; } mn[y * w + x] = lo; mx[y * w + x] = hi; }
+    const Ln = new Float32Array(n), V = 1 + .12 * lv, GR = 3.2 * lv;
+    for (let i = 0; i < n; i++) {
+      const d = L[i] - base1[i], ad = Math.abs(d), gain = 1 + Kd * ad / (ad + T);   // small |d| (noise) -> ~1, strong detail -> boosted
+      let v = base1[i] + d * gain + Kc * (base1[i] - base2[i]);
+      const m = 6 + 4 * lv; v = clamp(v, mn[i] - m, mx[i] + m);                         // no ringing / halos
+      // structure-aware micro detail: stronger where there is already texture, quiet in flat gradients
+      const x = (i % w), y = (i / w) | 0, nz = hash(x + gx, y + gy) - .5 + .5 * (hash((x + gx) >> 1, (y + gy) >> 1) - .5);
+      const act = Math.min(1, ad / 14), tone = .45 + .8 * Math.sin(Math.PI * clamp(v / 255, 0, 1));
+      v += nz * GR * (.25 + .75 * act) * tone;
+      Ln[i] = v;
+    }
+    const out = new Uint8ClampedArray(n * 4);
+    for (let i = 0; i < n; i++) { const v = Ln[i], b = cb[i] * V, c = cr[i] * V, g = (v - .299 * (v + c) - .114 * (v + b)) / .587; // keep chroma, new luma
+      out[i * 4] = v + c; out[i * 4 + 1] = v - (.299 * c + .114 * b) / .587; out[i * 4 + 2] = v + b; out[i * 4 + 3] = 255; }
+    return { rgba: out, L: Ln };
+  }
+  // src: {data:Uint8ClampedArray RGBA, width, height}. opts: scale (1,2,3,4), lv (0..3), wrap (tileable), wantL, onProgress(f), async
+  function run(src, opts, done) {
+    const sw = src.width, sh = src.height, scale = opts.scale || 1, lv = opts.lv == null ? 1 : opts.lv, ow = Math.round(sw * scale), oh = Math.round(sh * scale);
+    const cv = document.createElement('canvas'); cv.width = ow; cv.height = oh; const ctx = cv.getContext('2d');
+    const TS = opts.tile || 384, M = Math.max(10, Math.round(scale * 6) + 4), sc = Math.max(1, scale), Lout = opts.wantL ? new Float32Array(ow * oh) : null;
+    const tiles = []; for (let y = 0; y < oh; y += TS) for (let x = 0; x < ow; x += TS) tiles.push([x, y]);
+    let k = 0;
+    const step = () => {
+      const t0 = performance.now();
+      while (k < tiles.length) {
+        const [x, y] = tiles[k++], tw = Math.min(TS, ow - x), th = Math.min(TS, oh - y);
+        const x0 = opts.wrap ? x - M : Math.max(0, x - M), y0 = opts.wrap ? y - M : Math.max(0, y - M), x1 = opts.wrap ? x + tw + M : Math.min(ow, x + tw + M), y1 = opts.wrap ? y + th + M : Math.min(oh, y + th + M);
+        const w = x1 - x0, h = y1 - y0, P = sample(src.data, sw, sh, scale, !!opts.wrap, x0, y0, w, h);
+        const r = enhanceTile(P, w, h, lv, x0, y0, sc), cw = tw, ch = th, id = ctx.createImageData(cw, ch);
+        for (let j = 0; j < ch; j++) { const so = ((j + y - y0) * w + (x - x0)) * 4; id.data.set(r.rgba.subarray(so, so + cw * 4), j * cw * 4); if (Lout) for (let i = 0; i < cw; i++) Lout[(y + j) * ow + x + i] = r.L[(j + y - y0) * w + x - x0 + i]; }
+        if (opts.keepAlpha) for (let j = 0; j < ch; j++) { const sy = Math.min(sh - 1, Math.floor((y + j + .5) / scale)); for (let i = 0; i < cw; i++) id.data[(j * cw + i) * 4 + 3] = src.data[(sy * sw + Math.min(sw - 1, Math.floor((x + i + .5) / scale))) * 4 + 3]; }
+        ctx.putImageData(id, x, y);
+        if (opts.async && performance.now() - t0 > 40) { if (opts.onProgress) opts.onProgress(k / tiles.length); return setTimeout(step, 0); }
+      }
+      if (opts.onProgress) opts.onProgress(1); done(cv, Lout);
+    };
+    step();
+  }
+  return { run, guided, box };
+})();
+
+window.ProEnh=ProEnh;
 const EC=new WeakMap();
 // tileable (wrap-around) box blur x3 ~ gaussian, on a Float32Array channel — wrap so tiled blocks show no seams
 function blurW(a,w,h,r){const o=new Float32Array(a),t=new Float32Array(a.length),k=1/(2*r+1);
@@ -39210,20 +39325,24 @@ function enhPix(d,N,lv){const n=N*N,L=new Float32Array(n);
   const dl=A*(L[i]-s[i])+K*(L[i]-l[i]),g=(r()-.5)*2*G*(.45+L[i]/255*.8),nl=L[i]+dl+g;
   d[j]=nl+(d[j]+dl+g-nl)*V;d[j+1]=nl+(d[j+1]+dl+g-nl)*V;d[j+2]=nl+(d[j+2]+dl+g-nl)*V;H[i]=nl}
  return blurW(H,N,N,1)}
-function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv)return e;if(e){e.t.dispose();e.b.dispose()}
+let enhBusy=false;
+function enhTex(src,lv){const e=EC.get(src);if(e&&e.lv===lv&&e.t)return e;if(e&&e.pend&&e.lv===lv)return null;if(enhBusy)return null;
  const im0=src.image;if(!im0)return null;const sw=im0.width||im0.naturalWidth||256,sh=im0.height||im0.naturalHeight||256;
- let N=1;while(N<Math.max(sw,sh))N<<=1;N=Math.max(256,Math.min(1024,N)); // never smaller than the source (old version shrank everything to 256)
+ let N=1;while(N<Math.max(sw,sh))N<<=1;N=Math.max(256,Math.min(1024,N));
  const c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
  try{g.drawImage(im0,0,0,N,N)}catch(x){return null}let im;try{im=g.getImageData(0,0,N,N)}catch(x){return null}
- const H=enhPix(im.data,N,lv);g.putImageData(im,0,0);
- const M2=N>>1,bc=document.createElement('canvas');bc.width=bc.height=M2;const bg=bc.getContext('2d'),bi=bg.createImageData(M2,M2);
- for(let y=0;y<M2;y++)for(let x=0;x<M2;x++){const v=H[(y*2)*N+x*2],q=(y*M2+x)*4;bi.data[q]=bi.data[q+1]=bi.data[q+2]=v;bi.data[q+3]=255}bg.putImageData(bi,0,0);
- const mk=(cv,enc)=>{const t=new T.CanvasTexture(cv);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=enc;t.anisotropy=8;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;return t};
- const r={lv,t:mk(c,src.encoding),b:mk(bc,T.LinearEncoding)};EC.set(src,r);return r}
+ let alpha=false;for(let i=3;i<im.data.length;i+=4)if(im.data[i]<250){alpha=true;break}
+ const rec={lv,pend:true,old:e&&e.t?e:null};EC.set(src,rec);enhBusy=true;
+ try{ProEnh.run(im,{scale:N<=256?2:1,lv,wrap:true,wantL:true,keepAlpha:alpha,async:true},(cv,Lo)=>{
+  const ow=cv.width,M2=ow>>1,bc=document.createElement('canvas');bc.width=bc.height=M2;const bg=bc.getContext('2d'),bi=bg.createImageData(M2,M2);
+  for(let y=0;y<M2;y++)for(let x=0;x<M2;x++){const v=Lo[(y*2)*ow+x*2],q=(y*M2+x)*4;bi.data[q]=bi.data[q+1]=bi.data[q+2]=v;bi.data[q+3]=255}bg.putImageData(bi,0,0);
+  const mk=(cv2,enc)=>{const t=new T.CanvasTexture(cv2);t.wrapS=src.wrapS;t.wrapT=src.wrapT;t.flipY=src.flipY;t.encoding=enc;t.anisotropy=8;t.magFilter=T.LinearFilter;t.minFilter=T.LinearMipmapLinearFilter;t.generateMipmaps=true;return t};
+  rec.t=mk(cv,src.encoding);rec.b=mk(bc,T.LinearEncoding);rec.pend=false;if(rec.old){rec.old.t.dispose();rec.old.b.dispose();rec.old=null}enhBusy=false})}catch(x){enhBusy=false;EC.delete(src);console.error('ProEnh',x)}
+ return null}
 function eMat(m,lv){const u=m.userData;if(!u.o){if(!m.map)return false;u.o={map:m.map,bump:m.bumpMap,bs:m.bumpScale}}
  const k=lv.toFixed(2);if(u.eh===k)return false;u.eh=k;
  if(lv<=0){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs}
- else{const e=enhTex(u.o.map,lv);if(!e)return false;m.map=e.t;
+ else{const e=enhTex(u.o.map,lv);if(!e){u.eh=null;return false}m.map=e.t;
   if(u.o.bump){m.bumpMap=e.b;m.bumpScale=u.o.bs*lv}else if(!m.normalMap){m.bumpMap=e.b;m.bumpScale=.8*lv}}
  m.needsUpdate=true;return true}
 // one worker for both modes: Real-Life ON -> its procedural materials, OFF -> the normal Minecraft blocks. Time-boxed so the slider never freezes the phone.
@@ -39233,15 +39352,45 @@ function enhTick(){try{const v=vb();if(!v)return;const t0=performance.now(),list
  if(ch)v._t.env.requestRender()}catch(e){}}
 function setEnh(v){enh=v;try{localStorage.setItem('forgeTexEnh',String(v))}catch(e){}const V=vb();if(V){enhTick();V._t.env.requestRender();V._t.env.toast('✨ Texture Enhance: '+Math.round(v*100)+'%',1400)}}
 setInterval(enhTick,250);
+
+// ---------- PHOTO UPSCALER: pick any photo -> 2x / 4x / to 1K-2K-4K with the free Pro engine (works offline, no API, no cost) ----------
+function photoUp(){let p=document.getElementById('rlPhoto');if(p){p.remove();return}p=document.createElement('div');p.id='rlPhoto';
+ p.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(10,12,22,.97);color:#fff;font:13px system-ui;padding:14px;overflow:auto;touch-action:manipulation';
+ p.onpointerdown=e=>e.stopPropagation();const bs='padding:10px 12px;border-radius:9px;background:#2a3150;display:inline-block;margin:3px;text-align:center;';
+ p.innerHTML='<div style="font-weight:700;font-size:15px;margin-bottom:8px">\u{1F5BC} Photo Upscaler \u2014 1K / 2K / 4K (free, offline)</div>'+
+ '<input id="phF" type="file" accept="image/*" style="display:none"><div id="phPick" style="'+bs+'background:#3b4cff">\u{1F4C2} Photo chuno</div><span id="phInfo" style="opacity:.8"></span>'+
+ '<div style="margin-top:10px">Target size:</div><div id="phT"><span class="pt" data-s="2" style="'+bs+'">2x</span><span class="pt" data-s="4" style="'+bs+'">4x</span><span class="pt" data-l="1024" style="'+bs+'">\u2192 1K</span><span class="pt" data-l="2048" style="'+bs+'">\u2192 2K</span><span class="pt" data-l="4096" style="'+bs+'">\u2192 4K</span></div>'+
+ '<div style="margin-top:8px">Strength: <b id="phV">100%</b></div><input id="phS" type="range" min="0" max="300" step="10" value="100" style="width:100%">'+
+ '<div style="margin-top:10px"><span id="phGo" style="'+bs+'background:#1f9d55">\u2728 Enhance</span><span id="phSave" style="'+bs+';display:none">\u{1F4BE} Save</span><span id="phX" style="'+bs+'">\u2715 Close</span></div>'+
+ '<div id="phSt" style="margin:8px 0;opacity:.85"></div><div id="phBar" style="height:6px;background:#2a3150;border-radius:3px;display:none"><div id="phBi" style="height:100%;width:0;background:#4a8bff;border-radius:3px"></div></div>'+
+ '<div id="phOut" style="margin-top:10px"></div><div style="font-size:11px;opacity:.65;margin-top:8px">Ye AI model nahi hai: edge sharp, JPEG blocks/noise saaf, aur chhota detail add karta hai. Bahut dhundhli photo mein asli detail wapas nahi aata, lekin pehle se kaafi saaf dikhti hai. 4K mein 1\u20132 minute lag sakte hain.</div>';
+ document.body.appendChild(p);const $=s=>p.querySelector(s);let img=null,name='photo',sel={s:2},url=null,blob=null;
+ const info=()=>{$('#phInfo').textContent=img?img.width+'\u00d7'+img.height+' px':''};
+ p.querySelectorAll('.pt').forEach(b=>b.onpointerdown=()=>{p.querySelectorAll('.pt').forEach(x=>x.style.background='#2a3150');b.style.background='#3b4cff';sel=b.dataset.s?{s:+b.dataset.s}:{l:+b.dataset.l}});
+ p.querySelector('.pt').style.background='#3b4cff';
+ $('#phS').oninput=()=>{$('#phV').textContent=$('#phS').value+'%'};$('#phX').onpointerdown=()=>{if(url)URL.revokeObjectURL(url);p.remove()};
+ $('#phPick').onpointerdown=()=>$('#phF').click();
+ $('#phF').onchange=e=>{const f=e.target.files&&e.target.files[0];if(!f)return;name=(f.name||'photo').replace(/\.[^.]+$/,'');const im=new Image();im.onload=()=>{img=im;info();$('#phSt').textContent='Photo load ho gayi. Size chuno aur Enhance dabao.'};im.onerror=()=>{$('#phSt').textContent='Photo khul nahi payi.'};im.src=URL.createObjectURL(f)};
+ $('#phGo').onpointerdown=()=>{if(!img){$('#phSt').textContent='Pehle photo chuno.';return}
+  let sw=img.width,sh=img.height;const long0=Math.max(sw,sh);if(long0>2400){const k=2400/long0;sw=Math.round(sw*k);sh=Math.round(sh*k)}
+  let sc=sel.s||Math.max(1,Math.min(4,sel.l/Math.max(sw,sh)));sc=Math.round(sc*100)/100;if(sel.l&&sel.l<=Math.max(sw,sh)){sc=1}
+  while(sc>1&&Math.max(sw,sh)*sc>4096||sw*sh*sc*sc>16.8e6)sc=Math.floor((sc-.01)*100)/100;sc=Math.max(1,sc);
+  const c=document.createElement('canvas');c.width=sw;c.height=sh;const g=c.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(img,0,0,sw,sh);let im;try{im=g.getImageData(0,0,sw,sh)}catch(x){$('#phSt').textContent='Photo padhi nahi ja saki.';return}
+  $('#phSt').textContent='Enhance ho raha hai: '+sw+'\u00d7'+sh+' \u2192 '+Math.round(sw*sc)+'\u00d7'+Math.round(sh*sc)+' \u2026';$('#phBar').style.display='block';$('#phGo').style.opacity='.5';$('#phSave').style.display='none';$('#phOut').innerHTML='';
+  const t0=performance.now();
+  ProEnh.run(im,{scale:sc,lv:$('#phS').value/100,async:true,keepAlpha:true,onProgress:f=>{$('#phBi').style.width=Math.round(f*100)+'%'}},cv=>{
+   $('#phGo').style.opacity='1';$('#phSt').textContent='Ho gaya! '+cv.width+'\u00d7'+cv.height+' ('+Math.round((performance.now()-t0)/1000)+' sec)';
+   cv.toBlob(b=>{blob=b;if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(b);const o=$('#phOut');o.innerHTML='';const i2=new Image();i2.src=url;i2.style.cssText='max-width:100%;max-height:55vh;border-radius:8px;background:#000';o.appendChild(i2);$('#phSave').style.display='inline-block'},'image/png')})};
+ $('#phSave').onpointerdown=()=>{if(!blob)return;const fn=name+'_enhanced.png';if(window.__saveDataUrl)window.__saveDataUrl(url,fn);else{const a=document.createElement('a');a.href=url;a.download=fn;document.body.appendChild(a);a.click();a.remove()}}}
 function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}p=document.createElement('div');p.id='rlEnh';
  p.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:100001;padding:12px 14px;border-radius:14px;background:rgba(18,22,38,.96);color:#fff;font:13px system-ui;border:1px solid #4a5bff;touch-action:manipulation';
  p.onpointerdown=e=>e.stopPropagation();const bs='flex:1;padding:9px 4px;border-radius:8px;background:#2a3150;text-align:center;';
- p.innerHTML='<div style="font-weight:700;margin-bottom:6px">\u2728 Texture Enhancer: <span id="rlV">'+Math.round(enh*100)+'%</span></div><input id="rlS" type="range" min="0" max="300" step="5" value="'+Math.round(enh*100)+'" style="width:100%"><div style="display:flex;gap:6px;margin-top:8px"><div class="rb" data-v="0" style="'+bs+'">Off</div><div class="rb" data-v="100" style="'+bs+'">Normal</div><div class="rb" data-v="200" style="'+bs+'">Strong</div><div class="rb" data-v="300" style="'+bs+'">Max</div></div><div style="display:flex;gap:6px;margin-top:6px"><div id="rlR" style="'+bs+'">\u{1F30D} Real-Life: '+(on?'ON':'OFF')+'</div><div id="rlX" style="'+bs+'">\u2715 Close</div></div><div style="font-size:11px;opacity:.7;margin-top:6px">Slider chalate hi preview dikhta hai. 0% = original, 100% = sharp + rang + detail, 300% = sabse zyada.</div>';
+ p.innerHTML='<div style="font-weight:700;margin-bottom:6px">\u2728 Texture Enhancer: <span id="rlV">'+Math.round(enh*100)+'%</span></div><input id="rlS" type="range" min="0" max="300" step="5" value="'+Math.round(enh*100)+'" style="width:100%"><div style="display:flex;gap:6px;margin-top:8px"><div class="rb" data-v="0" style="'+bs+'">Off</div><div class="rb" data-v="100" style="'+bs+'">Normal</div><div class="rb" data-v="200" style="'+bs+'">Strong</div><div class="rb" data-v="300" style="'+bs+'">Max</div></div><div style="display:flex;gap:6px;margin-top:6px"><div id="rlR" style="'+bs+'">\u{1F30D} Real-Life: '+(on?'ON':'OFF')+'</div><div id="rlX" style="'+bs+'">\u2715 Close</div></div><div id="rlP" style="'+bs+'margin-top:6px;background:#3b4cff">\u{1F5BC} Photo Upscaler (1K / 2K / 4K)</div><div style="font-size:11px;opacity:.7;margin-top:6px">Slider chalate hi preview dikhta hai. 0% = original, 100% = sharp + rang + detail, 300% = sabse zyada.</div>';
  document.body.appendChild(p);const S=p.querySelector('#rlS'),V=p.querySelector('#rlV');
  let tm=0;S.oninput=()=>{V.textContent=S.value+'%';clearTimeout(tm);tm=setTimeout(()=>setEnh(S.value/100),150)};S.onchange=()=>{clearTimeout(tm);setEnh(S.value/100)};
  p.querySelectorAll('.rb').forEach(b=>b.onpointerdown=()=>{S.value=b.dataset.v;V.textContent=S.value+'%';setEnh(S.value/100)});
- p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
-window.RealLife={on:()=>on,set,panel,enh:()=>enh,setEnh};loop();
+ p.querySelector('#rlR').onpointerdown=()=>{set(!on);p.remove()};p.querySelector('#rlP').onpointerdown=()=>{p.remove();photoUp()};p.querySelector('#rlX').onpointerdown=()=>p.remove()}
+window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh};loop();
 })();
 </script>
 </body>
