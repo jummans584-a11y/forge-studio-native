@@ -34148,14 +34148,12 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
       r2.appendChild(inp); r2.appendChild(btn('✔ Set', () => { const v = parseFloat(inp.value); if (!(v > 0)) { toast('Enter size in meters, e.g. 0.3', 1600); return; } if (setBlockSize(v, W.keepShape)) buildTerrainDock(); }));
       toggleRow('Building ka shape same rakho (OFF = poori building chhoti/badi ho jayegi)', W.keepShape, v => { W.keepShape = v; });
     }
-    const autoOpenOn = () => { try { return localStorage.getItem('forgeTerrainAutoOpen') !== '0'; } catch (e) { return true; } };
     function buildTab() {
       ensureS(); const S = W.S;
       note('Minecraft jaisa: block grid par rakho, todo, ghar banao. Ek ungli se ghumao (camera), tap = tool ka kaam. 🕳/⛰ tool mein ungli ghisao.');
       { const gb = rowEl(true); gb.appendChild(btn('🎮 Game mein kholo — character ban kar banao (auto-save)', () => { try { window.ForgeTerrainGame.open(); } catch (e) { toast('Terrain Game error: ' + e.message, 3000); } }, true)); }
       { const er = rowEl(true); er.appendChild(btn('✨ Texture Enhancer (strength slider)', () => { if (window.RealLife) window.RealLife.panel(); }, true)); }
       toggleRow('🌍 Real-Life Mode (blocks = asli cheezen, asli collision)', !!(window.RealLife && window.RealLife.on()), v => { if (window.RealLife) window.RealLife.set(v); });
-      toggleRow('Build tab kholte hi game apne aap khule', autoOpenOn(), v => { try { localStorage.setItem('forgeTerrainAutoOpen', v ? '1' : '0'); } catch (e) { } });
       const hb = mkEl('div', 'display:flex;gap:4px;align-items:center;margin:2px 0 6px;overflow-x:auto;');
       for (let i = 0; i < 9; i++) {
         const d = W.defs.get(W.hot[i]), b = mkEl('button', 'position:relative;flex:0 0 auto;width:38px;height:38px;padding:2px;border-radius:7px;background:var(--panel-2);border:2px solid ' + (i === W.slot ? 'var(--accent)' : 'var(--line)') + ';');
@@ -34294,7 +34292,7 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     // ---------- public API ----------
     function tick() { const vis = !!(terrainRoot && terrainRoot.parent && workspace === 'terrain' && W.show); if (group.visible !== vis) { group.visible = vis; requestRender(); } }
     window.__forgeVoxelTick = tick;
-    function onMode(m) { if (m === 'voxel') { try { if (window.ForgeTerrainGame && !window.ForgeTerrainGame.noAuto && autoOpenOn()) setTimeout(() => { try { window.ForgeTerrainGame.open(); } catch (e) { console.error('Terrain Game open failed', e); } }, 150); } catch (e) { } applyCam(); updateSelBox(); buildPasteGhost(); } else { if (stroke) strokeEnd(); hideGhost(); selBox.visible = selFill.visible = false; if (pasteGhost) { group.remove(pasteGhost); pasteGhost = null; } requestRender(); } }
+    function onMode(m) { if (m === 'voxel') { applyCam(); updateSelBox(); buildPasteGhost(); } else { if (stroke) strokeEnd(); hideGhost(); selBox.visible = selFill.visible = false; if (pasteGhost) { group.remove(pasteGhost); pasteGhost = null; } requestRender(); } }
     return { buildTab, sizeUI, setBlockSize, getBlockSize: () => ensureS(), onMode, tick, serialize, load, cameraOn: toolIsCamera, applyCam, _w: W, _t: { orient: orientId, carpAct, carpMsg: () => carpMsg, rubList, sandResetList, rubWasNear: () => rubNear, gritRate, smoothable, SM_MAX, SM_GRIT, toggleList, breakList, mateId, normalizeInv, setHot, doReplace, INV_N, PREMADE, digAt, gridInfo, groundY, groundEdit, bake, ensureS, vxInRange, applyCh, env: { scene, renderer, toast, requestRender, workspace: () => workspace, size: () => (typeof TERRAIN_SIZE === 'number' && TERRAIN_SIZE > 0 ? TERRAIN_SIZE : 16), groundMeshes, key: vxKey, dda: vxDDA, defCanvas, scheduleSave } } };
   })();
   window.VoxelBuild = VoxelBuild;
@@ -39404,13 +39402,6 @@ function panel(){let p=document.getElementById('rlEnh');if(p){p.remove();return}
 function resetEnh(){try{ECS.forEach(r=>{r.dead=true;try{r.t&&r.t.dispose();r.b&&r.b.dispose()}catch(e){}});ECS.clear();EC=new WeakMap();enhBusy=false;
  const v=vb();if(!v)return;const list=[];Object.keys(MT).forEach(k=>list.push(MT[k]));const g=v._t.env.scene.getObjectByName('VoxelBuild');if(g)g.children.forEach(c=>{if(c!==rg)[].concat(c.material||[]).forEach(m=>list.push(m))});
  list.forEach(m=>{const u=m.userData;if(u&&u.o){m.map=u.o.map;m.bumpMap=u.o.bump;m.bumpScale=u.o.bs;delete u.o;m.needsUpdate=true}if(u)u.eh=null});v._t.env.requestRender()}catch(e){console.error('resetEnh',e)}}
-// always-available PLAY button: shows in the Build tab whenever the game is closed, so you can always get back in after Exit
-setInterval(()=>{try{const V=vb(),T=window.ForgeTerrainGame;let b=document.getElementById('forgePlayBtn');
- const show=!!(V&&T&&V._w&&V._w.show&&V._t.env.workspace()==='terrain'&&!T.isOpen());
- if(!show){if(b)b.style.display='none';return}
- if(!b){b=document.createElement('div');b.id='forgePlayBtn';b.textContent='\u{1F3AE} Play';b.style.cssText='position:fixed;right:12px;bottom:calc(210px + env(safe-area-inset-bottom));z-index:99990;padding:12px 18px;border-radius:26px;background:#1f9d55;color:#fff;font:700 15px system-ui;box-shadow:0 3px 12px rgba(0,0,0,.5);touch-action:manipulation';
-  b.onpointerdown=e=>{e.stopPropagation();e.preventDefault();try{T.open()}catch(x){V._t.env.toast('Game error: '+x.message,3000)}};document.body.appendChild(b)}
- b.style.display='block'}catch(e){}},700);
 window.RealLife={on:()=>on,set,panel,photo:photoUp,enh:()=>enh,setEnh,reset:resetEnh};loop();
 })();
 </script>
