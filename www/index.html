@@ -222,6 +222,15 @@
     #project-name-wrap { display: none !important; }
   }
 
+
+  /* Model ka naam ab dikhta nahi — lamba naam buttons ko dhakel deta tha */
+  #model-name-wrap { display: none !important; }
+  /* ⭐ Beginner-friendly: zaroori buttons chamakte hain, baaki normal rehte hain */
+  @keyframes faKeyGlow { 0%,100% { box-shadow: 0 0 0 1.5px var(--accent), 0 0 6px 0 var(--accent); } 50% { box-shadow: 0 0 0 1.5px var(--accent), 0 0 14px 3px var(--accent); } }
+  button.fa-key { position: relative; border-color: var(--accent) !important; box-shadow: 0 0 0 1.5px var(--accent), 0 0 8px 0 var(--accent); font-weight: 700; animation: faKeyGlow 2.4s ease-in-out infinite; }
+  button.fa-key::after { content: '★'; position: absolute; top: -7px; right: -5px; font-size: 10px; line-height: 1; padding: 2px 3px; border-radius: 8px; background: var(--accent); color: var(--on-accent, #fff); pointer-events: none; }
+  button.fa-key.iconbtn::after, #gizmoBar button.fa-key::after { display: none; }
+  @media (prefers-reduced-motion: reduce) { button.fa-key { animation: none; } }
   #workspace-tabs { display: flex; background: var(--panel-2); border-radius: var(--r-pill); padding: 2px; gap: 2px; border: 1px solid var(--line); flex-shrink: 0; }
   #workspace-tabs button { border: none; background: transparent; color: var(--ink-dim); padding: 6px 9px; border-radius: var(--r-pill); font-size: 10.5px; font-weight: 600; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; letter-spacing: 0.01em; }
   #workspace-tabs button.active { background: var(--accent); color: var(--on-accent); box-shadow: none; border-radius: var(--r-pill); font-weight: 700; }
@@ -3509,7 +3518,7 @@ window.__initForgeStudioApp = function () {
       vfxLink(); vfxSyncUI();
     }
     const sc = renderer.domElement.height / (2 * Math.tan(camera.fov * Math.PI / 360));
-    vEn.position.set(VFX.ex, .85, VFX.ez); vPl.visible = !charRoot;
+    vEn.position.set(VFX.ex, .85, VFX.ez); vPl.visible = true;
     VFX.layers.forEach(L => {
       const r = L._r;
       if (r.im) {
@@ -3650,7 +3659,7 @@ window.__initForgeStudioApp = function () {
   }
   function vfxEnterWs() {
     orbitOverride = false; controls.enabled = true; applyCameraModeFlags('orbit'); terrainModeCleanup(terrainMode, 'orbit'); terrainMode = 'orbit'; clearSelection();
-    deactivateTerrain(); if (charRoot) scene.add(charRoot); if (charRootB) scene.remove(charRootB); setCompareRulerVisible(false); skeletonVizGroup.visible = false;
+    deactivateTerrain(); if (charRoot) scene.remove(charRoot); if (charRootB) scene.remove(charRootB); setCompareRulerVisible(false); skeletonVizGroup.visible = false;
     activeRoot = null; statsbar.classList.remove('show'); modelNameWrap.style.display = 'none';
     if (!VFX.inited) { VFX.inited = true; try { const s = JSON.parse(localStorage.getItem('forge_vfx')); if (s && ((s.layers && s.layers.length) || s.graph)) { VFX.T = s.T || 5; VFX.speed = s.speed || 1; VFX.link = s.link !== false; if (s.ex != null) { VFX.ex = s.ex; VFX.ez = s.ez; } VFX.bg = s.bg || VFX.bg; (s.layers || []).forEach(l => { const L = Object.assign({}, VDEF, l); VFX.layers.push(L); vfxRt(L); if (L.shape === 'text' || L.shape === 'image') vfxMask(L); vfxSpriteImg(L); }); if (s.graph) { try { vgRestore(s.graph, 1); } catch (e) {} } } } catch (e) {} if (!VFX.layers.length && !VG.nodes.length) vfxAdd(VPRE.Fire, 'Fire'); }
     VFX.on = true; document.body.classList.add('vfx-on'); vfxGroup.visible = true; VFX.saveBg = scene.background; scene.background = VFX.bgObj || (VFX.bgObj = new THREE.Color(VFX.bg));
@@ -10262,7 +10271,7 @@ window.__initForgeStudioApp = function () {
     scheduleTextureRepair(obj, (info) => {
       if (info.missingTex || info.brightened) toast('Auto-fixed ' + (info.missingTex + info.brightened) + ' dark/broken material(s) on the model.', 3200);
     });
-    scene.add(obj);
+    if (workspace === 'character') scene.add(obj);
     if (workspace === 'character') {
       activeRoot = obj;
       fitCameraToObject(obj);
@@ -13310,11 +13319,11 @@ window.__initForgeStudioApp = function () {
   // ============================================================
   const UW = (function () {
     const KEY = 'forge_unified_world';
-    let on = true; try { on = localStorage.getItem(KEY) !== '0'; } catch (e) {}
+    let on = false; /* WALL: Character / Map / VFX alag-alag duniya hain — ek ka model doosre mein nahi jayega */
     const api = {
       get on() { return on; },
       wantGround: false,
-      setOn(v) { on = !!v; try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) {} },
+      setOn(v) { on = false; },
       charMeshes() {
         const out = [];
         [typeof charRoot !== 'undefined' ? charRoot : null, typeof charRootB !== 'undefined' ? charRootB : null].forEach(r => { if (r) r.traverse(o => { if (o.isMesh && o.visible && o.geometry) out.push(o); }); });
@@ -35193,6 +35202,15 @@ void fragment() { ALBEDO = texture(albedo_tex, UV).rgb; }
     // those don't happen inside the same input event that started them and would otherwise miss
     // the pointer/click-based requestRender() triggers.
     requestRender();
+    // WALL — har refresh par pakka karo ki sirf current workspace ki cheez scene mein hai.
+    try {
+      const inChar = workspace === 'character', inTer = workspace === 'terrain';
+      if (charRoot) { if (inChar) { if (charRoot.parent !== scene) scene.add(charRoot); } else if (charRoot.parent === scene) scene.remove(charRoot); }
+      if (charRootB) { if (inChar) { if (charRootB.parent !== scene) scene.add(charRootB); } else if (charRootB.parent === scene) scene.remove(charRootB); }
+      if (terrainRoot) { if (inTer) { if (terrainRoot.parent !== scene) scene.add(terrainRoot); } else if (terrainRoot.parent === scene) scene.remove(terrainRoot); }
+      if (!inChar) { skeletonVizGroup.visible = false; }
+      if (!inTer && typeof vfxGroup !== 'undefined' && !VFX.on) vfxGroup.visible = false;
+    } catch (e) {}
     if (VFX.on) { emptyState.style.display = 'none'; dockSheet.classList.remove('show'); return; }
     // charRoot !== null is the correct "is a character loaded" check — paintMeshes stays empty on
     // purpose for a "too dense to paint" character (charTooDense; see loadCharacterObject), so
@@ -39397,6 +39415,30 @@ window.RealLife={on:()=>false,set:()=>{},panel,photo:photoUp,enh:()=>enh,setEnh,
   setInterval(check, CHECK_EVERY);
   setTimeout(check, 4000);
   window.ForgeNetNotice = { enable: function (v) { try { localStorage.setItem(KEY, v ? '1' : '0'); } catch (e) { } if (!v) hide(); else check(); }, enabled: enabled, check: check };
+})();
+</script>
+
+<script id="faKeyButtons">
+/* ⭐ Useful-button highlighter — sirf zaroori buttons par glow; baaki sab normal. */
+(function () {
+  var IDS = ['homeNewBtn','homeOpenBtn','assetLibraryAddBtn','projectsSaveBtn','btn-undo','btn-redo','btn-menu','btn-asset-library','btn-projects','btn-snapshot','gizmoAddBtn','onboardingNext'];
+  var TXT = /^\s*(?:[^\w\s]\s*)?(import (?:model|character|map|a different)|import fbx|start blank terrain|export (?:character|terrain|map|texture)|save project|load project|add to map|add block|add animation files|save pose|save selected to library|\+ add models|\+ new project)/i;
+  var scheduled = false;
+  function mark() {
+    scheduled = false;
+    IDS.forEach(function (id) { var b = document.getElementById(id); if (b && !b.classList.contains('fa-key')) b.classList.add('fa-key'); });
+    var gm = document.querySelectorAll('#gizmoBar button[data-mode]');
+    for (var i = 0; i < gm.length; i++) gm[i].classList.add('fa-key');
+    var all = document.querySelectorAll('#dock-sheet button, #empty-state button, #homeScreen button, .modal button, [id*="Modal"] button, [id*="modal"] button');
+    for (var j = 0; j < all.length; j++) {
+      var b = all[j]; if (b.classList.contains('fa-key')) continue;
+      var t = (b.textContent || '').trim();
+      if (t.length < 80 && TXT.test(t)) b.classList.add('fa-key');
+    }
+  }
+  function sched() { if (scheduled) return; scheduled = true; (window.requestAnimationFrame || setTimeout)(mark); }
+  new MutationObserver(sched).observe(document.body, { childList: true, subtree: true });
+  if (document.readyState !== 'loading') sched(); else document.addEventListener('DOMContentLoaded', sched);
 })();
 </script>
 </body>
